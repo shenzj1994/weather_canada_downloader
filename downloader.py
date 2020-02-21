@@ -5,7 +5,6 @@ import re
 import time
 import urllib.parse as urlparse
 from multiprocessing.pool import ThreadPool
-from urllib.parse import urlencode
 
 import requests
 
@@ -46,7 +45,7 @@ class CanWeatherDataDownloader:
         query = dict(urlparse.parse_qsl(url_parts[4]))
         query.update(params)
 
-        url_parts[4] = urlencode(query)
+        url_parts[4] = urlparse.urlencode(query)
 
         url_to_get = urlparse.urlunparse(url_parts)
         # print(url_to_get)
