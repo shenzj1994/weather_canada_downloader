@@ -4,7 +4,6 @@ import os
 import re
 import time
 import urllib.parse as urlparse
-from multiprocessing.pool import ThreadPool
 
 import requests
 
@@ -105,11 +104,5 @@ class CanWeatherDataDownloader:
         logging.info("Total number of URLs: " + str(len(download_urls)))
         for u in download_urls:
             self.download_from_url(u, self.download_dir)
-
-
-# Run multiple threads. Each call will take the next element in urls list
-results = ThreadPool(1).imap_unordered(download_from_url, download_urls)
-for r in results:
-    print(r)
 
 # TODO: Add Station ID to each data file
