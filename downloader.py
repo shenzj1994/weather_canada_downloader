@@ -7,8 +7,6 @@ import urllib.parse as urlparse
 
 import requests
 
-from proxies import Proxies
-
 logging.basicConfig(level=logging.INFO)
 
 
@@ -17,10 +15,10 @@ class CanWeatherDataDownloader:
     download_dir = "./download/" + st + "/"
     output_format = 'csv'
     station_id_list = []
+    proxies = None
 
     def __init__(self):
-        if not os.path.exists(self.download_dir):
-            os.makedirs(self.download_dir)
+        pass
 
     @staticmethod
     def build_data_download_url(output_format, station_id, year, month, day, time_frame):
@@ -59,12 +57,12 @@ class CanWeatherDataDownloader:
         @return: A list contains all the station IDs
         """
         with open(file) as id_f:
-            station_id_list = id_f.readlines()
+            station_id_list = id_f.read().splitlines()
             logging.info("Total number of stations: " + str(len(station_id_list)))
         return station_id_list
 
     @staticmethod
-    def download_from_url(url, destination):
+    def download_from_url(url, destination, proxies=None):
         """
         Download single file from URL using the file name from 'content-disposition'.
         @type url: str
@@ -72,10 +70,11 @@ class CanWeatherDataDownloader:
 
         @param url: URL to download
         @param destination: Destination folder to store file
+        @param proxies: Optional parameter for proxies.
         """
-        logging.info("downloading: ", url)
+        logging.info("downloading: " + url)
 
-        r = requests.get(url, proxies=Proxies.get_random_proxy(), stream=True)
+        r = requests.get(url, proxies=proxies, stream=True)
         d = r.headers['content-disposition']
         fname: str = re.findall("filename=(.+)", d)[0]
 
@@ -84,6 +83,9 @@ class CanWeatherDataDownloader:
                 for data in r:
                     download_f.write(data)
         return url
+
+    def set_proxies(self, p):
+        self.proxies = p
 
     def download_daily_data(self, station_id_list, start_year, end_year):
         """
@@ -96,13 +98,18 @@ class CanWeatherDataDownloader:
         @param start_year: start year (inclusive)
         @param end_year: end year (inclusive)
         """
+
+        # Check and create download folder if not exist
+        if not os.path.exists(self.download_dir):
+            os.makedirs(self.download_dir)
+
         download_urls = []
         for y in range(start_year, end_year + 1):
             for s_id in station_id_list:
-                s_url = self.build_data_download_url(self.output_format, s_id[0], y, 1, 1, 2)
+                s_url = self.build_data_download_url(self.output_format, s_id, y, 1, 1, 2)
                 download_urls.append(s_url)
         logging.info("Total number of URLs: " + str(len(download_urls)))
         for u in download_urls:
-            self.download_from_url(u, self.download_dir)
+            self.download_from_url(u, self.download_dir, self.proxies)
 
 # TODO: Add Station ID to each data file
