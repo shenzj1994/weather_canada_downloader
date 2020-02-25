@@ -85,12 +85,18 @@ class CanWeatherDataDownloader:
         return url
 
     def set_proxies(self, p):
+        """
+        Set proxies for current downloader instance.
+
+        @type p: dict
+        @param p: A proxy Dict that contains HTTP and HTTPS proxies.
+        """
         self.proxies = p
 
     def download_daily_data(self, start_year, end_year, station_id_list=None):
         """
         Download daily data between start year and end year (inclusive)
-        @type station_id_list: list
+        @type station_id_list: list[str]
         @type start_year: int
         @type end_year: int
 
