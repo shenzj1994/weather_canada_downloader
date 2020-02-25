@@ -48,8 +48,7 @@ class CanWeatherDataDownloader:
         # print(url_to_get)
         return url_to_get
 
-    @staticmethod
-    def read_station_id_from_file(file):
+    def read_station_id_from_file(self, file):
         """
         Read all station IDs from file
 
@@ -59,6 +58,7 @@ class CanWeatherDataDownloader:
         with open(file) as id_f:
             station_id_list = id_f.read().splitlines()
             logging.info("Total number of stations: " + str(len(station_id_list)))
+        self.station_id_list = station_id_list
         return station_id_list
 
     @staticmethod
@@ -87,7 +87,7 @@ class CanWeatherDataDownloader:
     def set_proxies(self, p):
         self.proxies = p
 
-    def download_daily_data(self, station_id_list, start_year, end_year):
+    def download_daily_data(self, start_year, end_year, station_id_list=None):
         """
         Download daily data between start year and end year (inclusive)
         @type station_id_list: list
@@ -102,6 +102,9 @@ class CanWeatherDataDownloader:
         # Check and create download folder if not exist
         if not os.path.exists(self.download_dir):
             os.makedirs(self.download_dir)
+
+        if station_id_list is None:
+            station_id_list = self.station_id_list
 
         download_urls = []
         for y in range(start_year, end_year + 1):
