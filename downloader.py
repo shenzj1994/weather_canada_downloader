@@ -93,6 +93,16 @@ class CanWeatherDataDownloader:
         """
         self.proxies = p
 
+    def set_download_dir(self, d):
+        """
+        Set download directory
+        
+        @type d: str
+        @param d: Download directory
+        
+        """
+        self.download_dir = d
+
     def download_daily_data(self, start_year, end_year, station_id_list=None):
         """
         Download daily data between start year and end year (inclusive)
