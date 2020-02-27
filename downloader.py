@@ -4,10 +4,13 @@ import os
 import re
 import time
 import urllib.parse as urlparse
+from functools import partial
+from multiprocessing.pool import ThreadPool
 
 import requests
+from tqdm import tqdm
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.ERROR)
 
 
 class CanWeatherDataDownloader:
@@ -57,7 +60,7 @@ class CanWeatherDataDownloader:
         """
         with open(file) as id_f:
             station_id_list = id_f.read().splitlines()
-            logging.info("Total number of stations: " + str(len(station_id_list)))
+            print("Loaded {} stations from {}. ".format(len(station_id_list), file))
         self.station_id_list = station_id_list
         return station_id_list
 
@@ -82,7 +85,6 @@ class CanWeatherDataDownloader:
             with open(destination + fname.replace('"', ''), 'wb+') as download_f:
                 for data in r:
                     download_f.write(data)
-        return url
 
     def set_proxies(self, p):
         """
@@ -103,9 +105,11 @@ class CanWeatherDataDownloader:
         """
         self.download_dir = d
 
-    def download_daily_data(self, start_year, end_year, station_id_list=None):
+    def download_daily_data(self, start_year, end_year, station_id_list=None, thread=1):
         """
         Download daily data between start year and end year (inclusive)
+        @type thread: int
+        @param thread: Number of threads used in downloading files.
         @type station_id_list: list[str]
         @type start_year: int
         @type end_year: int
@@ -114,6 +118,8 @@ class CanWeatherDataDownloader:
         @param start_year: start year (inclusive)
         @param end_year: end year (inclusive)
         """
+
+        print("Preparing download data between {} and {} using {} thread(s).".format(start_year, end_year, thread))
 
         # Check and create download folder if not exist
         if not os.path.exists(self.download_dir):
@@ -127,8 +133,18 @@ class CanWeatherDataDownloader:
             for s_id in station_id_list:
                 s_url = self.build_data_download_url(self.output_format, s_id, y, 1, 1, 2)
                 download_urls.append(s_url)
-        logging.info("Total number of URLs: " + str(len(download_urls)))
-        for u in download_urls:
-            self.download_from_url(u, self.download_dir, self.proxies)
+        print("Total number of URLs: " + str(len(download_urls)))
+
+        if thread == 1:
+            for u in tqdm(download_urls, total=len(download_urls), unit=' file'):
+                self.download_from_url(u, self.download_dir, self.proxies)
+
+        else:
+            mt_download_func = partial(self.download_from_url, destination=self.download_dir, proxies=self.proxies)
+
+            results = ThreadPool(thread).imap_unordered(mt_download_func, download_urls)
+
+            for p in tqdm(results, total=len(download_urls), unit=' file'):
+                logging.debug(p)
 
 # TODO: Add Station ID to each data file
