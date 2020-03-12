@@ -23,6 +23,6 @@ class CSVCombiner:
         print(files)
 
         # combine all files in the list
-        combined_csv = pd.concat([pd.read_csv(self.csv_dir + f, encoding=self.input_encoding) for f in files])
+        combined_df = pd.concat([pd.read_csv(self.csv_dir + f, encoding=self.input_encoding) for f in files])
         # export to csv
-        combined_csv.to_csv(self.output_file, index=False, encoding=self.output_encoding)
+        combined_df.to_csv(self.output_file, index=False, encoding=self.output_encoding)
