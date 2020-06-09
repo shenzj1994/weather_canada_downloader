@@ -17,7 +17,7 @@ class CanWeatherDataDownloader:
     st = datetime.datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d-%H%M%S')
     download_dir = "./download/" + st + "/"
     output_format = 'csv'
-    station_id_list = []
+    all_station_id = set()
     proxies = None
 
     def __init__(self):
@@ -61,7 +61,7 @@ class CanWeatherDataDownloader:
         with open(file) as id_f:
             station_id_list = id_f.read().splitlines()
             print("Loaded {} stations from {}. ".format(len(station_id_list), file))
-        self.station_id_list = station_id_list
+        self.all_station_id = station_id_list
         return station_id_list
 
     @staticmethod
@@ -126,7 +126,7 @@ class CanWeatherDataDownloader:
             os.makedirs(self.download_dir)
 
         if station_id_list is None:
-            station_id_list = self.station_id_list
+            station_id_list = self.all_station_id
 
         download_urls = []
         for y in range(start_year, end_year + 1):
