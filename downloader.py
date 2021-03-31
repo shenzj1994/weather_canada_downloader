@@ -135,11 +135,15 @@ class CanWeatherDataDownloader:
                 download_urls.append(s_url)
         print("Total number of URLs: " + str(len(download_urls)))
 
+        # Determine if multi-thread downloading
         if thread == 1:
+            # Single thread, simple method
             for u in tqdm(download_urls, total=len(download_urls), unit=' file'):
                 self.download_from_url(u, self.download_dir, self.proxies)
 
         else:
+            # Multi-thread download
+            # Create a wrapper function to always assign download directory and proxy
             mt_download_func = partial(self.download_from_url, destination=self.download_dir, proxies=self.proxies)
 
             results = ThreadPool(thread).imap_unordered(mt_download_func, download_urls)
