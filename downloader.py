@@ -16,8 +16,8 @@ logging.basicConfig(level=logging.ERROR)
 class CanWeatherDataDownloader:
     st = datetime.datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d-%H%M%S')
     download_dir = "./download/" + st + "/"
-    output_format = 'csv'
-    all_station_id = set()
+    output_format = 'csv'  # Use CSV by default
+    all_station_id = set()  # Use a set to avoid duplicates
     proxies = None
 
     def __init__(self):
@@ -26,7 +26,7 @@ class CanWeatherDataDownloader:
     @staticmethod
     def build_data_download_url(output_format, station_id, year, month, day, time_frame):
         """
-        Build the downloadable URL.
+        Build a downloadable URL.
 
         @param output_format: Output format
         @param station_id: Station ID
@@ -47,9 +47,8 @@ class CanWeatherDataDownloader:
 
         url_parts[4] = urlparse.urlencode(query)
 
-        url_to_get = urlparse.urlunparse(url_parts)
-        # print(url_to_get)
-        return url_to_get
+        download_url = urlparse.urlunparse(url_parts)
+        return download_url
 
     def read_station_id_from_file(self, file):
         """
