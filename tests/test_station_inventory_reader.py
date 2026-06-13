@@ -1,5 +1,7 @@
 """Tests for the ``station_inventory_reader`` module."""
 
+# pylint: disable=redefined-outer-name
+
 from pathlib import Path
 
 import pandas as pd
@@ -24,6 +26,7 @@ def csv_path() -> Path:
 
 
 def test_returns_dataframe(csv_path):
+    """Function should return a non-empty DataFrame."""
     df = read_station_inventory(csv_path)
     assert isinstance(df, pd.DataFrame)
     assert not df.empty
@@ -39,6 +42,7 @@ def test_skiprows_removes_disclaimer(csv_path):
 
 
 def test_column_names_are_cleaned(csv_path):
+    """Column names should be lowercase with no spaces or special chars."""
     df = read_station_inventory(csv_path)
     for col in df.columns:
         assert col.islower(), f"Column {col!r} is not lower-case"
@@ -49,6 +53,7 @@ def test_column_names_are_cleaned(csv_path):
 
 
 def test_expected_columns_present(csv_path):
+    """The DataFrame should contain all expected column names."""
     df = read_station_inventory(csv_path)
     expected = {
         "name",
@@ -72,6 +77,7 @@ def test_expected_columns_present(csv_path):
 
 
 def test_station_id_is_integer(csv_path):
+    """Station ID column should have Int64 dtype with non-null values."""
     df = read_station_inventory(csv_path)
     # Station ID is nullable Int64; check a known value
     assert df["station_id"].dtype == "Int64"
@@ -81,17 +87,20 @@ def test_station_id_is_integer(csv_path):
 
 
 def test_elevation_is_float(csv_path):
+    """Elevation column should have float dtype."""
     df = read_station_inventory(csv_path)
     assert pd.api.types.is_float_dtype(df["elevation_m"])
 
 
 def test_year_columns_are_integer(csv_path):
+    """First Year and Last Year columns should have Int64 dtype."""
     df = read_station_inventory(csv_path)
     for col in ["first_year", "last_year"]:
         assert df[col].dtype == "Int64", f"{col} is not Int64"
 
 
 def test_string_columns_are_stripped(csv_path):
+    """String columns should have no leading or trailing whitespace."""
     df = read_station_inventory(csv_path)
     # If stripping worked, no leading/trailing whitespace remains
     for col in df.select_dtypes(include="object").columns:

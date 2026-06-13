@@ -4,6 +4,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from time import time
 
 import pandas as pd
+import requests
 
 from station_inventory_reader import read_station_inventory
 from downloader import download_climate_data
@@ -15,11 +16,19 @@ MAX_WORKERS = 50
 OUTPUT_FILE = "climate_data.parquet"
 
 def main() -> None:
+    """Download daily climate data for British Columbia stations in parallel."""
 
     df = read_station_inventory()
-    df = df[(df['dly_first_year'] <= START_YEAR) & (df['dly_last_year'] >= END_YEAR)&(df['province']=='BRITISH COLUMBIA')]
-    ALL_ELIGIBLE_STATION_LIST = df['climate_id'].to_list()
-    print(f"Downloading {TIMEFRAME} data for {len(ALL_ELIGIBLE_STATION_LIST)} stations in parallel …")
+    df = df[
+        (df['dly_first_year'] <= START_YEAR)
+        & (df['dly_last_year'] >= END_YEAR)
+        & (df['province'] == 'BRITISH COLUMBIA')
+    ]
+    all_eligible_station_list = df['climate_id'].to_list()
+    print(
+        f"Downloading {TIMEFRAME} data for "
+        f"{len(all_eligible_station_list)} stations in parallel …"
+    )
     results: list[pd.DataFrame] = []
 
     dl_start = time()
@@ -32,13 +41,13 @@ def main() -> None:
                 climate_id=cid,
                 timeframe=TIMEFRAME,
             ): cid
-            for cid in ALL_ELIGIBLE_STATION_LIST
+            for cid in all_eligible_station_list
         }
         for f in as_completed(fut):
             cid = fut[f]
             try:
                 df = f.result()
-            except Exception as exc:
+            except (requests.RequestException, ValueError, OSError) as exc:
                 print(f"  ❌ Station with Climate ID {cid} failed: {exc}")
                 continue
             if df.empty:

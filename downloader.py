@@ -9,48 +9,13 @@ from __future__ import annotations
 
 import warnings
 from io import StringIO
-from pathlib import Path
 from typing import Literal
 
 import pandas as pd
 import requests
 
-from _column_config import EXPECTED_COLUMNS
-
-
-DATA_DIR = Path(__file__).parent / "data"
-STATION_INVENTORY = DATA_DIR / "Station Inventory EN.csv"
-
-
-def _clean_column_names(df: pd.DataFrame) -> pd.DataFrame:
-    """Lowercase column names and replace spaces/hyphens with underscores."""
-    df = df.copy()
-    df.columns = (
-        df.columns.str.lower()
-        .str.replace(r"[\s\-]+", "_", regex=True)
-        .str.replace(r"[^a-z0-9_]", "", regex=True)
-    )
-    return df
-
-
-def load_station_inventory(
-    path: str | Path = STATION_INVENTORY,
-) -> pd.DataFrame:
-    """Load the station inventory CSV and return a cleaned DataFrame.
-
-    Parameters
-    ----------
-    path : str | Path
-        Path to the ``Station Inventory EN.csv`` file.
-        Defaults to the one shipped with the package under ``data/``.
-
-    Returns
-    -------
-    pd.DataFrame
-        Station inventory with cleaned (lowercase, underscore) column names.
-    """
-    df = pd.read_csv(path, skiprows=3)
-    return _clean_column_names(df)
+from _column_config import EXPECTED_COLUMNS, clean_column_names
+from station_inventory_reader import read_station_inventory
 
 
 def _lookup_station_id(climate_id: str) -> int:
@@ -76,7 +41,7 @@ def _lookup_station_id(climate_id: str) -> int:
         If the Climate ID is not found in the station inventory or matches
         multiple stations.
     """
-    inventory = load_station_inventory()
+    inventory = read_station_inventory()
     matches = inventory[inventory["climate_id"] == climate_id]
 
     if matches.empty:
@@ -95,6 +60,7 @@ def _lookup_station_id(climate_id: str) -> int:
     return int(matches.iloc[0]["station_id"])
 
 
+# pylint: disable=too-many-arguments,too-many-locals,too-many-branches
 def download_climate_data(
     climate_id: str | None = None,
     start_year: int | None = None,
@@ -222,7 +188,7 @@ def download_climate_data(
         return pd.DataFrame()
 
     result = pd.concat(frames, ignore_index=True)
-    result = _clean_column_names(result)
+    result = clean_column_names(result)
 
     # Validate that columns match the expected schema for this timeframe
     expected = EXPECTED_COLUMNS[timeframe]

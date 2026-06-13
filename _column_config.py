@@ -2,10 +2,24 @@
 Expected column names for each timeframe, derived from the Environment Canada
 bulk data API (observed using station 889, Vancouver Int'l A).
 
-These are the columns after passing through ``_clean_column_names()``
-(lowercased, spaces/hyphens → underscores, non-alphanumeric chars removed).
-They are used to validate downloaded DataFrames.
+Also provides ``clean_column_names()`` — a utility shared across the codebase
+to normalise column names (lowercase, spaces/hyphens → underscores,
+non-alphanumeric chars removed).
 """
+
+import pandas as pd
+
+
+def clean_column_names(df: pd.DataFrame) -> pd.DataFrame:
+    """Lowercase column names and replace spaces/hyphens with underscores."""
+    df = df.copy()
+    df.columns = (
+        df.columns.str.lower()
+        .str.replace(r"[\s\-]+", "_", regex=True)
+        .str.replace(r"[^a-z0-9_]", "", regex=True)
+    )
+    return df
+
 
 EXPECTED_COLUMNS: dict[str, list[str]] = {
     "daily": [

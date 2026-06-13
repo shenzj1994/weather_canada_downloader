@@ -1,5 +1,10 @@
-import pandas as pd
+"""Module to read and parse the Environment Canada Station Inventory CSV."""
+
 from pathlib import Path
+
+import pandas as pd
+
+from _column_config import clean_column_names
 
 
 def read_station_inventory(csv_path: str | Path = "data/Station Inventory EN.csv") -> pd.DataFrame:
@@ -44,10 +49,6 @@ def read_station_inventory(csv_path: str | Path = "data/Station Inventory EN.csv
         df[col] = df[col].str.strip()
 
     # Clean column names: lowercase, spaces/hyphens → underscores, remove other special chars
-    df.columns = (
-        df.columns.str.lower()
-        .str.replace(r"[\s\-]+", "_", regex=True)
-        .str.replace(r"[^a-z0-9_]", "", regex=True)
-    )
+    df = clean_column_names(df)
 
     return df

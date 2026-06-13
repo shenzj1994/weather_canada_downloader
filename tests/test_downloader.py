@@ -5,68 +5,72 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from downloader import (
-    _clean_column_names,
-    download_climate_data,
-    load_station_inventory,
-)
+from _column_config import clean_column_names
+from downloader import download_climate_data
+from station_inventory_reader import read_station_inventory
 
 
 # ---------------------------------------------------------------------------
-# Unit tests – _clean_column_names
+# Unit tests – clean_column_names
 # ---------------------------------------------------------------------------
 
 
 def test_clean_column_names_lowercases():
+    """Column names should be converted to lowercase."""
     df = pd.DataFrame(columns=["Name", "Station ID"])
-    result = _clean_column_names(df)
+    result = clean_column_names(df)
     assert list(result.columns) == ["name", "station_id"]
 
 
 def test_clean_column_names_replaces_spaces():
+    """Spaces in column names should be replaced with underscores."""
     df = pd.DataFrame(columns=["Max Temp (°C)", "Total Precip (mm)"])
-    result = _clean_column_names(df)
+    result = clean_column_names(df)
     assert "max_temp_c" in result.columns
     assert "total_precip_mm" in result.columns
 
 
 def test_clean_column_names_replaces_hyphens():
+    """Hyphens in column names should be replaced with underscores."""
     df = pd.DataFrame(columns=["Data-Quality", "Longitude-x"])
-    result = _clean_column_names(df)
+    result = clean_column_names(df)
     assert "data_quality" in result.columns
     assert "longitude_x" in result.columns
 
 
 def test_clean_column_names_strips_special_chars():
+    """Non-alphanumeric characters (except underscore) should be removed."""
     df = pd.DataFrame(columns=["Temp (°C)", "Speed (km/h)"])
-    result = _clean_column_names(df)
+    result = clean_column_names(df)
     # parentheses and slash stripped; only a-z, 0-9, underscore survives
     assert "temp_c" in result.columns
     assert "speed_kmh" in result.columns
 
 
 # ---------------------------------------------------------------------------
-# Unit tests – load_station_inventory
+# Unit tests – read_station_inventory
 # ---------------------------------------------------------------------------
 
 
-def test_load_station_inventory_returns_dataframe():
-    inv = load_station_inventory()
+def test_read_station_inventory_returns_dataframe():
+    """Loading the station inventory should return a non-empty DataFrame."""
+    inv = read_station_inventory()
     assert isinstance(inv, pd.DataFrame)
     assert not inv.empty
 
 
-def test_load_station_inventory_has_expected_columns():
-    inv = load_station_inventory()
+def test_read_station_inventory_has_expected_columns():
+    """The inventory DataFrame should contain all expected column names."""
+    inv = read_station_inventory()
     expected = {"name", "province", "climate_id", "station_id", "latitude_decimal_degrees",
                 "longitude_decimal_degrees", "elevation_m", "first_year", "last_year"}
     assert expected.issubset(inv.columns)
 
 
-def test_load_station_inventory_custom_path():
+def test_read_station_inventory_custom_path():
     """Accept a user-supplied path."""
     default = Path(__file__).parent.parent / "data" / "Station Inventory EN.csv"
-    inv = load_station_inventory(default)
+    inv = read_station_inventory(default)
     assert isinstance(inv, pd.DataFrame)
     assert not inv.empty
 
@@ -125,10 +129,12 @@ def test_download_climate_data_unknown_station():
 
 
 def test_invalid_timeframe_raises():
+    """Passing an unrecognized timeframe should raise a ValueError."""
     with pytest.raises(ValueError, match="timeframe"):
         download_climate_data("1108447", 2020, 2020, timeframe="weekly")  # type: ignore[arg-type]
 
 
 def test_start_year_after_end_year_raises():
+    """Passing start_year > end_year should raise a ValueError."""
     with pytest.raises(ValueError, match="start_year"):
         download_climate_data("1108447", 2023, 2020)
