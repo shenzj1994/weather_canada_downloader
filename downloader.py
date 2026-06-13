@@ -191,18 +191,21 @@ def download_climate_data(
     result = clean_column_names(result)
 
     # Validate that columns match the expected schema for this timeframe
-    expected = EXPECTED_COLUMNS[timeframe]
+    expected = set(EXPECTED_COLUMNS[timeframe])
     # Hourly data has timezone-dependent column names
     if timeframe == "hourly" and timezone == "utc":
-        expected = [
+        expected = {
             col.replace("datetime_lst", "datetime_utc").replace("time_lst", "time_utc")
             for col in expected
-        ]
-    if list(result.columns) != expected:
+        }
+    actual = set(result.columns)
+    if actual != expected:
+        missing = sorted(expected - actual)
+        extra = sorted(actual - expected)
         raise ValueError(
             f"Column mismatch for timeframe={timeframe!r}.\n"
-            f"Got:      {list(result.columns)}\n"
-            f"Expected: {expected}"
+            f"Missing: {missing}\n"
+            f"Extra:   {extra}"
         )
 
     return result
