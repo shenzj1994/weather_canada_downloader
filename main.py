@@ -12,6 +12,7 @@ START_YEAR = 1996
 END_YEAR = 2026
 TIMEFRAME = "daily"
 MAX_WORKERS = 50
+OUTPUT_FILE = "climate_data.parquet"
 
 def main() -> None:
 
@@ -53,6 +54,8 @@ def main() -> None:
     print(f"\nDone in {dl_end - dl_start:.1f} seconds")
     print(f"Combined shape: {combined.shape}")
     combined.info()
+    combined.to_parquet(OUTPUT_FILE, index=False)
+    print(f"Saved to {OUTPUT_FILE}")
 
 
 if __name__ == "__main__":
