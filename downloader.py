@@ -7,6 +7,7 @@ from the Government of Canada's climate data portal.
 
 from __future__ import annotations
 
+import warnings
 from io import StringIO
 from pathlib import Path
 from typing import Literal
@@ -52,10 +53,54 @@ def load_station_inventory(
     return _clean_column_names(df)
 
 
+def _lookup_station_id(climate_id: str) -> int:
+    """Look up the internal Station ID for a given Climate ID.
+
+    The Climate ID is the 7-digit official identifier (e.g. ``"1108447"``
+    for Vancouver Int'l A).  The Station ID is an internal database number
+    that the bulk-data API requires.
+
+    Parameters
+    ----------
+    climate_id : str
+        7-digit Climate ID from the station inventory.
+
+    Returns
+    -------
+    int
+        Corresponding internal Station ID.
+
+    Raises
+    ------
+    ValueError
+        If the Climate ID is not found in the station inventory or matches
+        multiple stations.
+    """
+    inventory = load_station_inventory()
+    matches = inventory[inventory["climate_id"] == climate_id]
+
+    if matches.empty:
+        raise ValueError(
+            f"Climate ID {climate_id!r} not found in the station inventory. "
+            f"Check the climate_id or use a station_id directly."
+        )
+
+    if len(matches) > 1:
+        raise ValueError(
+            f"Climate ID {climate_id!r} matches multiple stations in the "
+            f"inventory. This should not happen — the Climate ID is supposed "
+            f"to be a unique identifier."
+        )
+
+    return int(matches.iloc[0]["station_id"])
+
+
 def download_climate_data(
-    station_id: int,
-    start_year: int,
-    end_year: int,
+    climate_id: str | None = None,
+    start_year: int | None = None,
+    end_year: int | None = None,
+    *,
+    station_id: int | None = None,
     timeframe: Literal["hourly", "daily", "monthly"] = "daily",
     timezone: Literal["ltc", "utc"] = "ltc",
 ) -> pd.DataFrame:
@@ -65,16 +110,27 @@ def download_climate_data(
     data from the Environment and Climate Change Canada bulk data endpoint.
     All DataFrames are concatenated and returned as one.
 
+    You must provide **either** ``climate_id`` (the 7-digit official
+    identifier such as ``"1108447"``) **or** ``station_id`` (the internal
+    database number).  Using ``climate_id`` is recommended because the
+    Station ID is an internal numbering system subject to change without
+    notice.  If you pass ``station_id`` a warning will be emitted.
+
     Parameters
     ----------
-    station_id : int
-        The numeric Station ID from the station inventory (the ``Station ID``
-        column).  For example, the Vancouver International Airport station
-        has ``station_id=889``.
-    start_year : int
+    climate_id : str, optional
+        The 7-digit official Climate ID from the station inventory (e.g.
+        ``"1108447"`` for Vancouver Int'l A).  This is the recommended
+        way to identify a station.
+    start_year : int, optional
         First year of data to include (inclusive).
-    end_year : int
+    end_year : int, optional
         Last year of data to include (inclusive).
+    station_id : int, optional (keyword-only)
+        The internal Station ID from the station inventory (the ``Station
+        ID`` column).  For example, Vancouver International Airport has
+        ``station_id=889``.  **Not recommended** — use ``climate_id``
+        instead.
     timeframe : {"hourly", "daily", "monthly"}
         Temporal resolution of the data.
     timezone : {"ltc", "utc"}
@@ -91,10 +147,37 @@ def download_climate_data(
     Examples
     --------
     >>> from downloader import download_climate_data
-    >>> df = download_climate_data(889, 2020, 2021)
-    >>> df = download_climate_data(889, 2020, 2021, timeframe="hourly")
+    >>> df = download_climate_data("1108447", 2020, 2021)
+    >>> df = download_climate_data("1108447", 2020, 2021, timeframe="hourly")
+    >>> # Using station_id emits a warning
+    >>> df = download_climate_data(start_year=2020, end_year=2021, station_id=889)
     """
     timeframe_code = {"hourly": 1, "daily": 2, "monthly": 3}
+
+    if station_id is None and climate_id is None:
+        raise TypeError(
+            "Either `station_id` or `climate_id` must be provided."
+        )
+    if station_id is not None and climate_id is not None:
+        raise TypeError(
+            "Provide only one of `station_id` or `climate_id`, not both."
+        )
+
+    if climate_id is not None:
+        station_id = _lookup_station_id(climate_id)
+    else:
+        warnings.warn(
+            "Station ID is an internal numbering system and may be subject "
+            "to change without notice. Use `climate_id` (the 7-digit "
+            "official Climate ID) instead.",
+            UserWarning,
+            stacklevel=2,
+        )
+
+    if start_year is None or end_year is None:
+        raise TypeError(
+            "`start_year` and `end_year` are required."
+        )
 
     if timeframe not in timeframe_code:
         raise ValueError(

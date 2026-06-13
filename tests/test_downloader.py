@@ -79,7 +79,7 @@ def test_load_station_inventory_custom_path():
 @pytest.mark.parametrize("tf", ["daily", "monthly"])
 def test_download_climate_data_daily_and_monthly(tf):
     """One year of daily/monthly data for a small coastal station."""
-    df = download_climate_data(889, 2023, 2023, timeframe=tf)  # type: ignore[arg-type]
+    df = download_climate_data("1108447", 2023, 2023, timeframe=tf)
     assert isinstance(df, pd.DataFrame)
     assert not df.empty, f"No rows returned for timeframe={tf}"
     # columns should be clean
@@ -90,7 +90,7 @@ def test_download_climate_data_daily_and_monthly(tf):
 
 def test_download_climate_data_hourly():
     """A single month of hourly data (fast)."""
-    df = download_climate_data(889, 2023, 2023, timeframe="hourly")
+    df = download_climate_data("1108447", 2023, 2023, timeframe="hourly")
     assert isinstance(df, pd.DataFrame)
     assert not df.empty
 
@@ -98,14 +98,14 @@ def test_download_climate_data_hourly():
 @pytest.mark.parametrize("tz", ["ltc", "utc"])
 def test_download_climate_data_timezone(tz):
     """Hourly data with both timezone options."""
-    df = download_climate_data(889, 2024, 2024, timeframe="hourly", timezone=tz)  # type: ignore[arg-type]
+    df = download_climate_data("1108447", 2024, 2024, timeframe="hourly", timezone=tz)
     assert isinstance(df, pd.DataFrame)
     assert not df.empty
 
 
 def test_download_climate_data_multiple_years():
     """Two years of daily data concatenated."""
-    df = download_climate_data(889, 2022, 2023, timeframe="daily")
+    df = download_climate_data("1108447", 2022, 2023, timeframe="daily")
     years = df["year"].unique()
     assert 2022 in years
     assert 2023 in years
@@ -113,7 +113,8 @@ def test_download_climate_data_multiple_years():
 
 def test_download_climate_data_unknown_station():
     """A station_id with no data returns an empty DataFrame."""
-    df = download_climate_data(999999, 2000, 2000, timeframe="daily")
+    df = download_climate_data(start_year=2000, end_year=2000,
+                               station_id=999999, timeframe="daily")
     assert isinstance(df, pd.DataFrame)
     assert df.empty
 
@@ -125,9 +126,9 @@ def test_download_climate_data_unknown_station():
 
 def test_invalid_timeframe_raises():
     with pytest.raises(ValueError, match="timeframe"):
-        download_climate_data(889, 2020, 2020, timeframe="weekly")  # type: ignore[arg-type]
+        download_climate_data("1108447", 2020, 2020, timeframe="weekly")  # type: ignore[arg-type]
 
 
 def test_start_year_after_end_year_raises():
     with pytest.raises(ValueError, match="start_year"):
-        download_climate_data(889, 2023, 2020)
+        download_climate_data("1108447", 2023, 2020)

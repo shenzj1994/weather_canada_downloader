@@ -18,7 +18,7 @@ def main() -> None:
 
     df = read_station_inventory()
     df = df[(df['dly_first_year'] <= START_YEAR) & (df['dly_last_year'] >= END_YEAR)&(df['province']=='BRITISH COLUMBIA')]
-    ALL_ELIGIBLE_STATION_LIST = df['station_id'].to_list()
+    ALL_ELIGIBLE_STATION_LIST = df['climate_id'].to_list()
     print(f"Downloading {TIMEFRAME} data for {len(ALL_ELIGIBLE_STATION_LIST)} stations in parallel …")
     results: list[pd.DataFrame] = []
 
@@ -26,23 +26,27 @@ def main() -> None:
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
         fut = {
             pool.submit(
-                download_climate_data, sid, START_YEAR, END_YEAR, timeframe=TIMEFRAME
-            ): sid
-            for sid in ALL_ELIGIBLE_STATION_LIST
+                download_climate_data,
+                start_year=START_YEAR,
+                end_year=END_YEAR,
+                climate_id=cid,
+                timeframe=TIMEFRAME,
+            ): cid
+            for cid in ALL_ELIGIBLE_STATION_LIST
         }
         for f in as_completed(fut):
-            sid = fut[f]
+            cid = fut[f]
             try:
                 df = f.result()
             except Exception as exc:
-                print(f"  ❌ Station {sid} failed: {exc}")
+                print(f"  ❌ Station {cid} failed: {exc}")
                 continue
             if df.empty:
-                print(f"  ⚠️ Station {sid}: no data returned")
+                print(f"  ⚠️ Station {cid}: no data returned")
                 continue
-            df["station_id"] = sid
+            df["climate_id"] = cid
             results.append(df)
-            print(f"  ✅ Station {sid}: {df.shape[0]} rows")
+            print(f"  ✅ Station {cid}: {df.shape[0]} rows")
 
     dl_end = time()
 
