@@ -10,22 +10,22 @@ from downloader import download_climate_data
 
 START_YEAR = 1996
 END_YEAR = 2026
-
+TIMEFRAME = "daily"
+MAX_WORKERS = 50
 
 def main() -> None:
 
-    """Download daily data for all stations in STATION_LIST in parallel."""
     df = read_station_inventory()
-    df = df[(df['dly_first_year'] <= START_YEAR) & (df['dly_last_year'] >= END_YEAR)]
+    df = df[(df['dly_first_year'] <= START_YEAR) & (df['dly_last_year'] >= END_YEAR)&(df['province']=='BRITISH COLUMBIA')]
     ALL_ELIGIBLE_STATION_LIST = df['station_id'].to_list()
-    print(f"Downloading daily data for {len(ALL_ELIGIBLE_STATION_LIST)} stations in parallel …")
+    print(f"Downloading {TIMEFRAME} data for {len(ALL_ELIGIBLE_STATION_LIST)} stations in parallel …")
     results: list[pd.DataFrame] = []
 
     dl_start = time()
-    with ThreadPoolExecutor(max_workers=20) as pool:
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
         fut = {
             pool.submit(
-                download_climate_data, sid, START_YEAR, END_YEAR, timeframe="daily"
+                download_climate_data, sid, START_YEAR, END_YEAR, timeframe=TIMEFRAME
             ): sid
             for sid in ALL_ELIGIBLE_STATION_LIST
         }
