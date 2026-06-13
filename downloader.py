@@ -14,6 +14,8 @@ from typing import Literal
 import pandas as pd
 import requests
 
+from _column_config import EXPECTED_COLUMNS
+
 
 DATA_DIR = Path(__file__).parent / "data"
 STATION_INVENTORY = DATA_DIR / "Station Inventory EN.csv"
@@ -137,4 +139,21 @@ def download_climate_data(
         return pd.DataFrame()
 
     result = pd.concat(frames, ignore_index=True)
-    return _clean_column_names(result)
+    result = _clean_column_names(result)
+
+    # Validate that columns match the expected schema for this timeframe
+    expected = EXPECTED_COLUMNS[timeframe]
+    # Hourly data has timezone-dependent column names
+    if timeframe == "hourly" and timezone == "utc":
+        expected = [
+            col.replace("datetime_lst", "datetime_utc").replace("time_lst", "time_utc")
+            for col in expected
+        ]
+    if list(result.columns) != expected:
+        raise ValueError(
+            f"Column mismatch for timeframe={timeframe!r}.\n"
+            f"Got:      {list(result.columns)}\n"
+            f"Expected: {expected}"
+        )
+
+    return result
