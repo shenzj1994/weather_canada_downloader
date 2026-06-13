@@ -39,14 +39,14 @@ def main() -> None:
             try:
                 df = f.result()
             except Exception as exc:
-                print(f"  ❌ Station {cid} failed: {exc}")
+                print(f"  ❌ Station with Climate ID {cid} failed: {exc}")
                 continue
             if df.empty:
-                print(f"  ⚠️ Station {cid}: no data returned")
+                print(f"  ⚠️ Station with Climate ID {cid}: no data returned")
                 continue
             df["climate_id"] = cid
             results.append(df)
-            print(f"  ✅ Station {cid}: {df.shape[0]} rows")
+            print(f"  ✅ Station with Climate ID {cid}: {df.shape[0]} rows")
 
     dl_end = time()
 
