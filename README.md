@@ -48,6 +48,11 @@ should be preferred over the internal Station ID. Per ECCC, Station IDs are
 One of `climate_id` or `station_id` must be provided — not both, and not neither.
 Using `climate_id` is recommended; passing `station_id=` emits a `UserWarning`.
 
+Behavior by timeframe:
+
+- `daily`: sends one request per year with `Month=1` and `Day=1`; the ECCC API returns the full year in that response.
+- `hourly` and `monthly`: sends one request per month in the selected year range.
+
 | Argument     | Type    | Default   | Description                                              |
 |--------------|---------|-----------|----------------------------------------------------------|
 | `climate_id` | `str`   | `None`    | Official 7-digit Climate ID (e.g. `"1108447"`)          |

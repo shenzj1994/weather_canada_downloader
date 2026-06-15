@@ -24,7 +24,7 @@ _NUMERIC_SUFFIXES = (
     "_days_c",             # heat/cool degree days (°C variant)
     "_",                   # rel_hum_ (relative humidity)
 )
-_ALWAYS_NUMERIC = frozenset({"year", "month", "day", "climate_id"})
+_ALWAYS_NUMERIC = frozenset({"year", "month", "day"})
 
 
 def clean_column_names(df: pd.DataFrame) -> pd.DataFrame:
@@ -47,6 +47,10 @@ def coerce_numeric_dtypes(df: pd.DataFrame) -> pd.DataFrame:
     them safely via ``pd.to_numeric(..., errors="coerce")``.
     """
     df = df.copy()
+    if "climate_id" in df.columns:
+        # Climate IDs may contain letters (e.g. "116FRMN"); keep as text.
+        df["climate_id"] = df["climate_id"].astype("string")
+
     for col in df.columns:
         if col in _ALWAYS_NUMERIC or col.endswith(_NUMERIC_SUFFIXES):
             if df[col].dtype == object:

@@ -138,3 +138,14 @@ def test_start_year_after_end_year_raises():
     """Passing start_year > end_year should raise a ValueError."""
     with pytest.raises(ValueError, match="start_year"):
         download_climate_data("1108447", 2023, 2020)
+
+
+def test_daily_download_returns_full_year():
+    """A one-year daily download should include rows spanning the year."""
+    df = download_climate_data("1108447", 2023, 2023, timeframe="daily")
+
+    assert not df.empty
+    assert df["year"].nunique() == 1
+    assert df["year"].iat[0] == 2023
+    assert 1 in df["month"].unique()
+    assert 12 in df["month"].unique()

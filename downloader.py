@@ -7,6 +7,7 @@ from the Government of Canada's climate data portal.
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 import warnings
 from io import StringIO
 from typing import Literal
@@ -69,12 +70,15 @@ def download_climate_data(
     station_id: int | None = None,
     timeframe: Literal["hourly", "daily", "monthly"] = "daily",
     timezone: Literal["ltc", "utc"] = "ltc",
+    max_workers: int = 12,
 ) -> pd.DataFrame:
     """Download climate data for a single station as a pandas DataFrame.
 
-    Iterates over every month in the requested year range and fetches CSV
-    data from the Environment and Climate Change Canada bulk data endpoint.
-    All DataFrames are concatenated and returned as one.
+    Fetches CSV data from the Environment and Climate Change Canada bulk
+    data endpoint and concatenates all chunks into one DataFrame.
+    For ``timeframe="daily"``, the downloader requests one file per year
+    using ``Month=1`` and ``Day=1`` because the API returns the entire year.
+    For ``"hourly"`` and ``"monthly"``, it iterates through all months.
 
     You must provide **either** ``climate_id`` (the 7-digit official
     identifier such as ``"1108447"``) **or** ``station_id`` (the internal
@@ -98,11 +102,16 @@ def download_climate_data(
         ``station_id=889``.  **Not recommended** — use ``climate_id``
         instead.
     timeframe : {"hourly", "daily", "monthly"}
-        Temporal resolution of the data.
+        Temporal resolution of the data.  For ``"daily"``, one request is
+        made per year (``Month=1``, ``Day=1``) and the API returns the full
+        year.  ``"hourly"`` and ``"monthly"`` fetch each month.
     timezone : {"ltc", "utc"}
         Time zone for hourly data.  ``"ltc"`` = local time (default),
         ``"utc"`` = Coordinated Universal Time (sent as ``&time=UTC`` to
         the API).  Ignored for daily/monthly.
+    max_workers : int
+        Maximum number of concurrent month downloads. Use ``1`` to disable
+        concurrency. Defaults to ``12``.
 
     Returns
     -------
@@ -150,6 +159,8 @@ def download_climate_data(
             f"`timeframe` must be one of {list(timeframe_code.keys())}, "
             f"got {timeframe!r}"
         )
+    if max_workers < 1:
+        raise ValueError(f"`max_workers` must be >= 1, got {max_workers}")
     if start_year > end_year:
         raise ValueError(
             f"`start_year` ({start_year}) must be <= `end_year` ({end_year})"
@@ -159,30 +170,51 @@ def download_climate_data(
     frames: list[pd.DataFrame] = []
     base_url = "https://climate.weather.gc.ca/climate_data/bulk_data_e.html"
 
-    for year in range(start_year, end_year + 1):
-        for month in range(1, 13):
-            url = (
-                f"{base_url}?format=csv"
-                f"&stationID={station_id}"
-                f"&Year={year}"
-                f"&Month={month}"
-                f"&Day=1"
-                f"&timeframe={tf}"
-                f"&submit=Download+Data"
-            )
-            if timezone == "utc":
-                url += "&time=UTC"
+    def _download_one_period(year_month: tuple[int, int]) -> pd.DataFrame | None:
+        year, month = year_month
+        url = (
+            f"{base_url}?format=csv"
+            f"&stationID={station_id}"
+            f"&Year={year}"
+            f"&Month={month}"
+            f"&Day=1"
+            f"&timeframe={tf}"
+            f"&submit=Download+Data"
+        )
+        if timezone == "utc":
+            url += "&time=UTC"
 
-            resp = requests.get(url, timeout=60)
-            resp.raise_for_status()
+        resp = requests.get(url, timeout=60)
+        resp.raise_for_status()
 
-            # The server may return HTML (e.g. for unknown stations) instead of CSV
-            if not resp.text.startswith('"'):
-                continue
+        # The server may return HTML (e.g. for unknown stations) instead of CSV
+        if not resp.text.startswith('"'):
+            return None
 
-            chunk = pd.read_csv(StringIO(resp.text))
-            if not chunk.empty:
+        chunk = pd.read_csv(StringIO(resp.text))
+        return chunk if not chunk.empty else None
+
+    periods_to_fetch = [
+        (year, 1)
+        for year in range(start_year, end_year + 1)
+    ] if timeframe == "daily" else [
+        (year, month)
+        for year in range(start_year, end_year + 1)
+        for month in range(1, 13)
+    ]
+
+    workers = min(max_workers, len(periods_to_fetch))
+    if workers == 1:
+        for year_month in periods_to_fetch:
+            chunk = _download_one_period(year_month)
+            if chunk is not None:
                 frames.append(chunk)
+    else:
+        # executor.map preserves input order, so concat order remains deterministic.
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            for chunk in executor.map(_download_one_period, periods_to_fetch):
+                if chunk is not None:
+                    frames.append(chunk)
 
     if not frames:
         return pd.DataFrame()
