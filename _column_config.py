@@ -10,6 +10,23 @@ non-alphanumeric chars removed).
 import pandas as pd
 
 
+# Numeric columns that must be coerced from object → float before writing Parquet.
+# Derived from the union of all numeric-measurement columns across timeframes.
+_NUMERIC_SUFFIXES = (
+    "_x", "_y",            # longitude, latitude
+    "_c",                  # temperature (°C)
+    "_mm",                 # millimetres (rain, precip)
+    "_cm",                 # centimetres (snow, snow on ground)
+    "_kmh",                # km/h (wind/gust speed)
+    "_deg",                # degrees (wind direction)
+    "_kpa",                # kPa (pressure)
+    "_days",               # heat/cool degree days
+    "_days_c",             # heat/cool degree days (°C variant)
+    "_",                   # rel_hum_ (relative humidity)
+)
+_ALWAYS_NUMERIC = frozenset({"year", "month", "day", "climate_id"})
+
+
 def clean_column_names(df: pd.DataFrame) -> pd.DataFrame:
     """Lowercase column names and replace spaces/hyphens with underscores."""
     df = df.copy()
@@ -18,6 +35,22 @@ def clean_column_names(df: pd.DataFrame) -> pd.DataFrame:
         .str.replace(r"[\s\-]+", "_", regex=True)
         .str.replace(r"[^a-z0-9_]", "", regex=True)
     )
+    return df
+
+
+def coerce_numeric_dtypes(df: pd.DataFrame) -> pd.DataFrame:
+    """Coerce known numeric columns to float64 so Parquet writes succeed.
+
+    Some stations return empty strings or other non-numeric placeholders in
+    measurement columns.  After ``pd.concat``, those columns end up as
+    ``object`` dtype, which PyArrow refuses to write.  This function converts
+    them safely via ``pd.to_numeric(..., errors="coerce")``.
+    """
+    df = df.copy()
+    for col in df.columns:
+        if col in _ALWAYS_NUMERIC or col.endswith(_NUMERIC_SUFFIXES):
+            if df[col].dtype == object:
+                df[col] = pd.to_numeric(df[col], errors="coerce").astype("float64")
     return df
 
 

@@ -6,28 +6,29 @@ from time import time
 import pandas as pd
 import requests
 
+from _column_config import coerce_numeric_dtypes
 from station_inventory_reader import read_station_inventory
 from downloader import download_climate_data
 
-START_YEAR = 1996
+START_YEAR = 2015
 END_YEAR = 2026
 TIMEFRAME = "daily"
 MAX_WORKERS = 50
-OUTPUT_FILE = "climate_data.parquet"
+OUTPUT_FILE = "sample_data/bc_daily_climate_data_2015_2026.parquet"
 
 def main() -> None:
     """Download daily climate data for British Columbia stations in parallel."""
 
     df = read_station_inventory()
     df = df[
-        (df['dly_first_year'] <= START_YEAR)
-        & (df['dly_last_year'] >= END_YEAR)
-        & (df['province'] == 'BRITISH COLUMBIA')
+        # (df['dly_first_year'] <= START_YEAR)
+        # & (df['dly_last_year'] >= END_YEAR)
+        (df['province'] == 'BRITISH COLUMBIA')
     ]
     all_eligible_station_list = df['climate_id'].to_list()
     print(
         f"Downloading {TIMEFRAME} data for "
-        f"{len(all_eligible_station_list)} stations in parallel …"
+        f"{len(all_eligible_station_list)} stations in parallel with {MAX_WORKERS} workers…"
     )
     results: list[pd.DataFrame] = []
 
@@ -64,6 +65,7 @@ def main() -> None:
         return
 
     combined = pd.concat(results, ignore_index=True)
+    combined = coerce_numeric_dtypes(combined)
     print(f"\nDone in {dl_end - dl_start:.1f} seconds")
     print(f"Combined shape: {combined.shape}")
     combined.info()
