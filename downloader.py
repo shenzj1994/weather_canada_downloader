@@ -8,6 +8,7 @@ from the Government of Canada's climate data portal.
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+from functools import lru_cache
 import warnings
 from io import StringIO
 from typing import Literal
@@ -17,6 +18,12 @@ import requests
 
 from _column_config import EXPECTED_COLUMNS, clean_column_names
 from station_inventory_reader import read_station_inventory
+
+
+@lru_cache(maxsize=1)
+def _cached_station_inventory() -> pd.DataFrame:
+    """Return the station inventory DataFrame, cached after first read."""
+    return read_station_inventory()
 
 
 def _lookup_station_id(climate_id: str) -> int:
@@ -42,7 +49,7 @@ def _lookup_station_id(climate_id: str) -> int:
         If the Climate ID is not found in the station inventory or matches
         multiple stations.
     """
-    inventory = read_station_inventory()
+    inventory = _cached_station_inventory()
     matches = inventory[inventory["climate_id"] == climate_id]
 
     if matches.empty:
