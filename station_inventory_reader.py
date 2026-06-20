@@ -1,12 +1,13 @@
 """Module to read and parse the Environment Canada Station Inventory CSV."""
 
+from functools import lru_cache
 from pathlib import Path
 
 import pandas as pd
 
 from _column_config import clean_column_names
 
-
+@lru_cache(maxsize=1)
 def read_station_inventory(csv_path: str | Path = "data/Station Inventory EN.csv") -> pd.DataFrame:
     """
     Read the Environment Canada Station Inventory CSV and return a pandas DataFrame.

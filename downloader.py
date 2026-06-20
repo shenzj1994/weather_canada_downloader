@@ -61,7 +61,7 @@ def _lookup_station_id(climate_id: str) -> int:
     return int(matches.iloc[0]["station_id"])
 
 
-# pylint: disable=too-many-arguments,too-many-locals,too-many-branches
+# pylint: disable=too-many-arguments,too-many-locals
 def download_climate_data(
     climate_id: str | None = None,
     start_year: int | None = None,
