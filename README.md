@@ -10,7 +10,7 @@ The package wraps the [ECCC bulk data endpoint](https://climate.weather.gc.ca/cl
 pip install canada-weather-downloader
 ```
 
-Requires Python ≥ 3.13, `pandas`, and `requests`.
+Requires Python ≥ 3.10, `pandas`, `requests`, and `tqdm`.
 
 ## Quick Start
 
@@ -30,9 +30,9 @@ df_hourly = download_climate_data("1108447", 2020, 2020, timeframe="hourly", tim
 Use the bundled station inventory:
 
 ```python
-from downloader import load_station_inventory
+from station_inventory_reader import read_station_inventory
 
-inv = load_station_inventory()
+inv = read_station_inventory()
 vancouver = inv[inv["name"].str.contains("VANCOUVER INT'L", na=False)]
 print(vancouver[["name", "climate_id", "station_id", "province"]])
 ```
@@ -64,6 +64,6 @@ Behavior by timeframe:
 
 Returns a **single `pd.DataFrame`** with cleaned column names (lowercase, spaces replaced by underscores).
 
-### `load_station_inventory(path)`
+### `read_station_inventory(csv_path)`
 
-Load the station inventory CSV. Returns a cleaned DataFrame.
+Load the station inventory CSV. Returns a cleaned DataFrame with normalized column names.
