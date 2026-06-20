@@ -229,7 +229,9 @@ def download_climate_data(
     result = pd.concat(frames, ignore_index=True)
     result = clean_column_names(result)
 
-    # Validate that columns match the expected schema for this timeframe
+    # Validate that columns match the expected schema for this timeframe.
+    # Missing expected columns are an error (API contract changed).
+    # Extra columns are logged as a warning — the API may have added fields.
     expected = set(EXPECTED_COLUMNS[timeframe])
     # Hourly data has timezone-dependent column names
     if timeframe == "hourly" and timezone == "utc":
@@ -238,13 +240,18 @@ def download_climate_data(
             for col in expected
         }
     actual = set(result.columns)
-    if actual != expected:
-        missing = sorted(expected - actual)
-        extra = sorted(actual - expected)
+    missing = sorted(expected - actual)
+    extra = sorted(actual - expected)
+    if missing:
         raise ValueError(
-            f"Column mismatch for timeframe={timeframe!r}.\n"
-            f"Missing: {missing}\n"
-            f"Extra:   {extra}"
+            f"Missing expected columns for timeframe={timeframe!r}: {missing}"
+        )
+    if extra:
+        warnings.warn(
+            f"Unexpected columns returned by API for timeframe={timeframe!r}: "
+            f"{extra}. The API may have added new fields.",
+            UserWarning,
+            stacklevel=2,
         )
 
     return result
