@@ -1,17 +1,21 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
 [project]
 name = "canada-weather-downloader"
 version = "0.1.0"
 description = "A Python package to download historical weather data for Canadian cities."
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = ">=3.10"
 dependencies = [
-    "pandas>=3.0.3",
-    "pyarrow>=24.0.0",
-    "requests>=2.34.2",
-    "tqdm>=4.68.2",
+    "pandas>=2.0",
+    "pyarrow>=10.0",
+    "requests>=2.25",
+    "tqdm>=4.60",
 ]
 
-[dependency-groups]
+[project.optional-dependencies]
 dev = [
-    "pytest>=9.0.3",
+    "pytest>=7.0",
 ]
