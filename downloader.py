@@ -8,15 +8,48 @@ from the Government of Canada's climate data portal.
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+from functools import lru_cache
 import warnings
 from io import StringIO
 from typing import Literal
 
 import pandas as pd
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 from _column_config import EXPECTED_COLUMNS, clean_column_names
 from station_inventory_reader import read_station_inventory
+
+
+def _retry_session(
+    retries: int = 3,
+    backoff_factor: float = 1.0,
+    status_forcelist: tuple[int, ...] = (429, 500, 502, 503, 504),
+) -> requests.Session:
+    """Create a requests Session with automatic retry on transient errors.
+
+    Retries on: connection errors, read timeouts, and server-side HTTP
+    status codes (429, 5xx).  Uses exponential backoff between retries.
+    """
+    retry_strategy = Retry(
+        total=retries,
+        backoff_factor=backoff_factor,
+        status_forcelist=status_forcelist,
+        allowed_methods={"GET"},
+        raise_on_status=False,
+    )
+    session = requests.Session()
+    adapter = HTTPAdapter(max_retries=retry_strategy)
+    session.mount("https://", adapter)
+    session.mount("http://", adapter)
+    return session
+
+
+@lru_cache(maxsize=1)
+def _cached_station_inventory() -> pd.DataFrame:
+    """Return the station inventory DataFrame, cached after first read."""
+    return read_station_inventory()
 
 
 def _lookup_station_id(climate_id: str) -> int:
@@ -42,7 +75,7 @@ def _lookup_station_id(climate_id: str) -> int:
         If the Climate ID is not found in the station inventory or matches
         multiple stations.
     """
-    inventory = read_station_inventory()
+    inventory = _cached_station_inventory()
     matches = inventory[inventory["climate_id"] == climate_id]
 
     if matches.empty:
@@ -184,7 +217,8 @@ def download_climate_data(
         if timezone == "utc":
             url += "&time=UTC"
 
-        resp = requests.get(url, timeout=60)
+        session = _retry_session()
+        resp = session.get(url, timeout=60)
         resp.raise_for_status()
 
         # The server may return HTML (e.g. for unknown stations) instead of CSV
@@ -222,7 +256,9 @@ def download_climate_data(
     result = pd.concat(frames, ignore_index=True)
     result = clean_column_names(result)
 
-    # Validate that columns match the expected schema for this timeframe
+    # Validate that columns match the expected schema for this timeframe.
+    # Missing expected columns are an error (API contract changed).
+    # Extra columns are logged as a warning — the API may have added fields.
     expected = set(EXPECTED_COLUMNS[timeframe])
     # Hourly data has timezone-dependent column names
     if timeframe == "hourly" and timezone == "utc":
@@ -231,13 +267,18 @@ def download_climate_data(
             for col in expected
         }
     actual = set(result.columns)
-    if actual != expected:
-        missing = sorted(expected - actual)
-        extra = sorted(actual - expected)
+    missing = sorted(expected - actual)
+    extra = sorted(actual - expected)
+    if missing:
         raise ValueError(
-            f"Column mismatch for timeframe={timeframe!r}.\n"
-            f"Missing: {missing}\n"
-            f"Extra:   {extra}"
+            f"Missing expected columns for timeframe={timeframe!r}: {missing}"
+        )
+    if extra:
+        warnings.warn(
+            f"Unexpected columns returned by API for timeframe={timeframe!r}: "
+            f"{extra}. The API may have added new fields.",
+            UserWarning,
+            stacklevel=2,
         )
 
     return result
