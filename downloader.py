@@ -15,9 +15,35 @@ from typing import Literal
 
 import pandas as pd
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 from _column_config import EXPECTED_COLUMNS, clean_column_names
 from station_inventory_reader import read_station_inventory
+
+
+def _retry_session(
+    retries: int = 3,
+    backoff_factor: float = 1.0,
+    status_forcelist: tuple[int, ...] = (429, 500, 502, 503, 504),
+) -> requests.Session:
+    """Create a requests Session with automatic retry on transient errors.
+
+    Retries on: connection errors, read timeouts, and server-side HTTP
+    status codes (429, 5xx).  Uses exponential backoff between retries.
+    """
+    retry_strategy = Retry(
+        total=retries,
+        backoff_factor=backoff_factor,
+        status_forcelist=status_forcelist,
+        allowed_methods={"GET"},
+        raise_on_status=False,
+    )
+    session = requests.Session()
+    adapter = HTTPAdapter(max_retries=retry_strategy)
+    session.mount("https://", adapter)
+    session.mount("http://", adapter)
+    return session
 
 
 @lru_cache(maxsize=1)
@@ -191,7 +217,8 @@ def download_climate_data(
         if timezone == "utc":
             url += "&time=UTC"
 
-        resp = requests.get(url, timeout=60)
+        session = _retry_session()
+        resp = session.get(url, timeout=60)
         resp.raise_for_status()
 
         # The server may return HTML (e.g. for unknown stations) instead of CSV
