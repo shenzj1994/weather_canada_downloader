@@ -10,7 +10,7 @@ The package wraps the [ECCC bulk data endpoint](https://climate.weather.gc.ca/cl
 pip install canada-weather-downloader
 ```
 
-Requires Python ≥ 3.10, `pandas`, `requests`, and `tqdm`.
+Requires Python ≥ 3.12, `pandas`, `requests`, and `tqdm`.
 
 ## Quick Start
 
