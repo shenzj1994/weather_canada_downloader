@@ -1,21 +1,37 @@
 name: Tests
 
-on: [push, pull_request]
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "17 9 * * 1"  # weekly live-API check (Mondays 09:17 UTC)
+  workflow_dispatch:
 
 jobs:
-  test:
+  unit:
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     strategy:
       matrix:
         python-version: ["3.12", "3.13", "3.14"]
-
     steps:
       - uses: actions/checkout@v4
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v5
+      - uses: astral-sh/setup-uv@v5
         with:
           python-version: ${{ matrix.python-version }}
+      - name: Run offline tests
+        run: uv run --extra dev pytest -m "not integration" -v --tb=short
 
-      - name: Run tests
-        run: uv run --extra dev pytest tests/ -v --tb=short
+  integration:
+    # Hits the real ECCC endpoint, so it runs on a schedule (or manually)
+    # rather than on every push.
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.13"
+      - name: Run live API tests
+        run: uv run --extra dev pytest -m integration -v --tb=short
