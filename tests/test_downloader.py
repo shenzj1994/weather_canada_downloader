@@ -1,151 +1,217 @@
-"""Tests for the ``downloader`` module — hits the real ECCC API."""
+"""Offline tests for canada_weather.downloader (HTTP is faked; see conftest.py)."""
 
-from pathlib import Path
+# pylint: disable=missing-function-docstring,missing-class-docstring,redefined-outer-name
+
+
+
+from datetime import date
 
 import pandas as pd
 import pytest
 
-from _column_config import clean_column_names
-from downloader import download_climate_data
-from station_inventory_reader import read_station_inventory
+from canada_weather import download_climate_data, download_many
+from canada_weather import downloader as dl
+from canada_weather._columns import expected_columns
+
+from .conftest import FakeResponse, FakeSession, daily_csv
+
+VANCOUVER = "1108395"  # VANCOUVER INTL A, station 51442, 2013-present
+VANCOUVER_OLD = "1108447"  # VANCOUVER INT'L A, station 889, 1937-2013
 
 
-# ---------------------------------------------------------------------------
-# Unit tests – clean_column_names
-# ---------------------------------------------------------------------------
+# --- request construction --------------------------------------------------
 
 
-def test_clean_column_names_lowercases():
-    """Column names should be converted to lowercase."""
-    df = pd.DataFrame(columns=["Name", "Station ID"])
-    result = clean_column_names(df)
-    assert list(result.columns) == ["name", "station_id"]
+def test_daily_makes_one_request_per_year(fake_session):
+    download_climate_data(VANCOUVER, 2020, 2022, session=fake_session)
+    assert [(c["Year"], c["Month"]) for c in fake_session.calls] == [(2020, 1), (2021, 1), (2022, 1)]
+    assert {c["stationID"] for c in fake_session.calls} == {51442}
+    assert {c["timeframe"] for c in fake_session.calls} == {2}
 
 
-def test_clean_column_names_replaces_spaces():
-    """Spaces in column names should be replaced with underscores."""
-    df = pd.DataFrame(columns=["Max Temp (°C)", "Total Precip (mm)"])
-    result = clean_column_names(df)
-    assert "max_temp_c" in result.columns
-    assert "total_precip_mm" in result.columns
+def test_hourly_makes_one_request_per_month(fake_session):
+    download_climate_data(VANCOUVER, 2020, 2020, timeframe="hourly", session=fake_session)
+    assert [c["Month"] for c in fake_session.calls] == list(range(1, 13))
+    assert all("time" not in c for c in fake_session.calls)
 
 
-def test_clean_column_names_replaces_hyphens():
-    """Hyphens in column names should be replaced with underscores."""
-    df = pd.DataFrame(columns=["Data-Quality", "Longitude-x"])
-    result = clean_column_names(df)
-    assert "data_quality" in result.columns
-    assert "longitude_x" in result.columns
+def test_utc_adds_time_param_and_renames_columns(fake_session):
+    df = download_climate_data(VANCOUVER, 2020, 2020, timeframe="hourly",
+                               timezone="utc", session=fake_session)
+    assert all(c["time"] == "UTC" for c in fake_session.calls)
+    assert {"datetime_utc", "time_utc"} <= set(df.columns)
 
 
-def test_clean_column_names_strips_special_chars():
-    """Non-alphanumeric characters (except underscore) should be removed."""
-    df = pd.DataFrame(columns=["Temp (°C)", "Speed (km/h)"])
-    result = clean_column_names(df)
-    # parentheses and slash stripped; only a-z, 0-9, underscore survives
-    assert "temp_c" in result.columns
-    assert "speed_kmh" in result.columns
+def test_ltc_is_alias_for_lst(fake_session):
+    df = download_climate_data(VANCOUVER, 2020, 2020, timeframe="hourly",
+                               timezone="ltc", session=fake_session)
+    assert "datetime_lst" in df.columns
 
 
-# ---------------------------------------------------------------------------
-# Unit tests – read_station_inventory
-# ---------------------------------------------------------------------------
+def test_monthly_makes_a_single_request_and_filters_years(fake_session):
+    df = download_climate_data(VANCOUVER_OLD, 2000, 2001, timeframe="monthly", session=fake_session)
+    assert len(fake_session.calls) == 1
+    assert sorted(df["year"].unique()) == [2000, 2001]
+    assert len(df) == 24
+    assert not df.duplicated(subset=["year", "month"]).any()
 
 
-def test_read_station_inventory_returns_dataframe():
-    """Loading the station inventory should return a non-empty DataFrame."""
-    inv = read_station_inventory()
-    assert isinstance(inv, pd.DataFrame)
-    assert not inv.empty
+def test_future_periods_are_not_requested(fake_session, monkeypatch):
+    class FixedDate(date):
+        @classmethod
+        def today(cls):
+            return cls(2025, 3, 15)
+
+    monkeypatch.setattr(dl, "date", FixedDate)
+    download_climate_data(VANCOUVER, 2025, 2026, timeframe="hourly", session=fake_session)
+    assert [(c["Year"], c["Month"]) for c in fake_session.calls] == [(2025, 1), (2025, 2), (2025, 3)]
 
 
-def test_read_station_inventory_has_expected_columns():
-    """The inventory DataFrame should contain all expected column names."""
-    inv = read_station_inventory()
-    expected = {"name", "province", "climate_id", "station_id", "latitude_decimal_degrees",
-                "longitude_decimal_degrees", "elevation_m", "first_year", "last_year"}
-    assert expected.issubset(inv.columns)
+# --- station record clipping --------------------------------------------
 
 
-def test_read_station_inventory_custom_path():
-    """Accept a user-supplied path."""
-    default = Path(__file__).parent.parent / "data" / "Station Inventory EN.csv"
-    inv = read_station_inventory(default)
-    assert isinstance(inv, pd.DataFrame)
-    assert not inv.empty
+def test_years_are_clipped_to_station_record(fake_session):
+    # Station 889 has daily data only up to 2013.
+    download_climate_data(VANCOUVER_OLD, 2012, 2020, session=fake_session)
+    assert [c["Year"] for c in fake_session.calls] == [2012, 2013]
 
 
-# ---------------------------------------------------------------------------
-# Integration tests – download_climate_data  (hits real API)
-# ---------------------------------------------------------------------------
+def test_no_overlap_returns_empty_with_warning(fake_session):
+    with pytest.warns(UserWarning, match="no daily data"):
+        df = download_climate_data(VANCOUVER_OLD, 2020, 2021, session=fake_session)
+    assert df.empty
+    assert fake_session.calls == []
+    assert set(df.columns) == expected_columns("daily")
 
 
-@pytest.mark.parametrize("tf", ["daily", "monthly"])
-def test_download_climate_data_daily_and_monthly(tf):
-    """One year of daily/monthly data for a small coastal station."""
-    df = download_climate_data("1108447", 2023, 2023, timeframe=tf)
-    assert isinstance(df, pd.DataFrame)
-    assert not df.empty, f"No rows returned for timeframe={tf}"
-    # columns should be clean
-    assert all(" " not in c and c.islower() for c in df.columns), (
-        f"Unclean columns: {df.columns.tolist()}"
-    )
+def test_clip_can_be_disabled(fake_session):
+    download_climate_data(VANCOUVER_OLD, 2020, 2020, clip_to_record=False, session=fake_session)
+    assert len(fake_session.calls) == 1
 
 
-def test_download_climate_data_hourly():
-    """A single month of hourly data (fast)."""
-    df = download_climate_data("1108447", 2023, 2023, timeframe="hourly")
-    assert isinstance(df, pd.DataFrame)
-    assert not df.empty
+# --- output cleaning ---------------------------------------------------
 
 
-@pytest.mark.parametrize("tz", ["ltc", "utc"])
-def test_download_climate_data_timezone(tz):
-    """Hourly data with both timezone options."""
-    df = download_climate_data("1108447", 2024, 2024, timeframe="hourly", timezone=tz)
-    assert isinstance(df, pd.DataFrame)
-    assert not df.empty
+def test_daily_output_columns_and_types(fake_session):
+    df = download_climate_data(VANCOUVER, 2020, 2020, session=fake_session)
+    assert len(df) == 366
+    assert set(df.columns) == expected_columns("daily")
+    assert pd.api.types.is_datetime64_any_dtype(df["datetime"])
+    assert df["max_temp_c"].dtype == "float64"
+    assert df["year"].dtype == "Int64"
+    assert df["climate_id"].iloc[0] == VANCOUVER
+    assert df["total_rain_flag"].dtype == "string"
 
 
-def test_download_climate_data_multiple_years():
-    """Two years of daily data concatenated."""
-    df = download_climate_data("1108447", 2022, 2023, timeframe="daily")
-    years = df["year"].unique()
-    assert 2022 in years
-    assert 2023 in years
+def test_hourly_text_and_numeric_columns(fake_session):
+    df = download_climate_data(VANCOUVER, 2020, 2020, timeframe="hourly", session=fake_session)
+    for col in ("temp_c", "rel_hum_", "hmdx", "wind_chill", "stn_press_kpa"):
+        assert df[col].dtype == "float64", col
+    assert df["weather"].dtype == "string"
 
 
-def test_download_climate_data_unknown_station():
-    """A station_id with no data returns an empty DataFrame."""
-    df = download_climate_data(start_year=2000, end_year=2000,
-                               station_id=999999, timeframe="daily")
-    assert isinstance(df, pd.DataFrame)
+def test_blank_rows_are_dropped():
+    session = FakeSession(lambda p: FakeResponse(daily_csv(int(p["Year"]), blank_from=(7, 1))))
+    df = download_climate_data(VANCOUVER, 2020, 2020, session=session)
+    assert len(df) == 182  # Jan 1 - Jun 30 in a leap year
+    kept = download_climate_data(VANCOUVER, 2020, 2020, session=session, drop_empty=False)
+    assert len(kept) == 366
+
+
+def test_coerce_types_false_keeps_text(fake_session):
+    df = download_climate_data(VANCOUVER, 2020, 2020, session=fake_session, coerce_types=False)
+    assert not pd.api.types.is_float_dtype(df["max_temp_c"])
+
+
+def test_schema_drift_warns_or_raises():
+    def handler(params):
+        text = daily_csv(int(params["Year"])).replace('"Max Temp (°C)"', '"Maximum Temp (°C)"', 1)
+        return FakeResponse(text)
+
+    with pytest.warns(UserWarning, match="max_temp_c"):
+        download_climate_data(VANCOUVER, 2020, 2020, session=FakeSession(handler))
+    with pytest.raises(ValueError, match="max_temp_c"):
+        download_climate_data(VANCOUVER, 2020, 2020, session=FakeSession(handler), strict=True)
+
+
+def test_html_response_is_treated_as_no_data(fake_session):
+    with pytest.warns(UserWarning, match="Station ID"):
+        df = download_climate_data(start_year=2000, end_year=2000, station_id=999999,
+                                   session=fake_session)
     assert df.empty
 
 
-# ---------------------------------------------------------------------------
-# Edge-case validation tests (no API call)
-# ---------------------------------------------------------------------------
+# --- caching ---------------------------------------------------------------
 
 
-def test_invalid_timeframe_raises():
-    """Passing an unrecognized timeframe should raise a ValueError."""
-    with pytest.raises(ValueError, match="timeframe"):
-        download_climate_data("1108447", 2020, 2020, timeframe="weekly")  # type: ignore[arg-type]
+def test_cache_reuses_completed_periods(fake_session, tmp_path):
+    download_climate_data(VANCOUVER, 2020, 2021, session=fake_session, cache=tmp_path)
+    assert len(fake_session.calls) == 2
+    download_climate_data(VANCOUVER, 2020, 2021, session=fake_session, cache=tmp_path)
+    assert len(fake_session.calls) == 2  # served from disk
+    assert len(list(tmp_path.rglob("*.csv"))) == 2
 
 
-def test_start_year_after_end_year_raises():
-    """Passing start_year > end_year should raise a ValueError."""
-    with pytest.raises(ValueError, match="start_year"):
-        download_climate_data("1108447", 2023, 2020)
+def test_current_year_is_not_cached(fake_session, tmp_path):
+    year = date.today().year
+    download_climate_data(VANCOUVER, year, year, session=fake_session, cache=tmp_path)
+    assert not list(tmp_path.rglob("*.csv"))
 
 
-def test_daily_download_returns_full_year():
-    """A one-year daily download should include rows spanning the year."""
-    df = download_climate_data("1108447", 2023, 2023, timeframe="daily")
+# --- input validation --------------------------------------------------
 
+
+@pytest.mark.parametrize("cid", [1108395, " 1108395 ", "1108395"])
+def test_climate_id_is_normalised(fake_session, cid):
+    df = download_climate_data(cid, 2020, 2020, session=fake_session)
     assert not df.empty
-    assert df["year"].nunique() == 1
-    assert df["year"].iat[0] == 2023
-    assert 1 in df["month"].unique()
-    assert 12 in df["month"].unique()
+
+
+def test_unknown_climate_id_raises():
+    with pytest.raises(ValueError, match="not found"):
+        download_climate_data("0000000", 2020, 2020)
+
+
+@pytest.mark.parametrize(
+    "kwargs, exc, match",
+    [
+        ({"climate_id": VANCOUVER, "start_year": 2020, "end_year": 2020, "timeframe": "weekly"},
+         ValueError, "timeframe"),
+        ({"climate_id": VANCOUVER, "start_year": 2023, "end_year": 2020}, ValueError, "start_year"),
+        ({"climate_id": VANCOUVER, "start_year": 2020, "end_year": 2020, "timezone": "pst"},
+         ValueError, "timezone"),
+        ({"climate_id": VANCOUVER, "start_year": 2020}, TypeError, "end_year"),
+        ({"start_year": 2020, "end_year": 2020}, TypeError, "Either"),
+        ({"climate_id": VANCOUVER, "station_id": 51442, "start_year": 2020, "end_year": 2020},
+         TypeError, "only one"),
+        ({"climate_id": VANCOUVER, "start_year": 2020, "end_year": 2020, "max_workers": 0},
+         ValueError, "max_workers"),
+    ],
+)
+def test_invalid_arguments(kwargs, exc, match):
+    with pytest.raises(exc, match=match):
+        download_climate_data(**kwargs)
+
+
+def test_station_id_warns(fake_session):
+    with pytest.warns(UserWarning, match="internal numbering"):
+        df = download_climate_data(start_year=2020, end_year=2020, station_id=51442,
+                                   session=fake_session)
+    assert not df.empty
+
+
+# --- download_many -----------------------------------------------------
+
+
+def test_download_many_combines_and_reports_failures(monkeypatch, fake_session):
+    monkeypatch.setattr(dl, "make_session", lambda **_: fake_session)
+    with pytest.warns(UserWarning, match="0000000"):
+        df = download_many([VANCOUVER, "0000000"], 2020, 2020)
+    assert set(df["climate_id"]) == {VANCOUVER}
+    assert list(df.attrs["failed"]) == ["0000000"]
+
+
+def test_download_many_raise(monkeypatch, fake_session):
+    monkeypatch.setattr(dl, "make_session", lambda **_: fake_session)
+    with pytest.raises(ValueError):
+        download_many(["0000000"], 2020, 2020, on_error="raise")

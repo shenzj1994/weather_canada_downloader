@@ -4,21 +4,48 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "canada-weather-downloader"
-version = "0.1.0"
-description = "A Python package to download historical weather data for Canadian cities."
+version = "0.2.0"
+description = "Download historical weather data from Environment and Climate Change Canada as pandas DataFrames."
 readme = "README.md"
 requires-python = ">=3.12"
+keywords = ["weather", "climate", "canada", "eccc", "environment canada", "pandas"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Atmospheric Science",
+]
 dependencies = [
     "pandas>=2.0",
-    "pyarrow>=10.0",
     "requests>=2.25",
     "tqdm>=4.60",
 ]
 
 [project.optional-dependencies]
+parquet = ["pyarrow>=10.0"]
 dev = [
     "pytest>=7.0",
+    "pylint>=3.0",
+    "pyarrow>=10.0",
 ]
 
-[tool.setuptools]
-py-modules = ["downloader", "station_inventory_reader", "_column_config"]
+[project.scripts]
+canada-weather = "canada_weather.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/shenzj1994/weather_canada_downloader"
+"Data source" = "https://collaboration.cmc.ec.gc.ca/cmc/climate/Get_More_Data_Plus_de_donnees/"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+canada_weather = ["data/*.csv"]
+
+[tool.pylint.main]
+max-line-length = 110
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "integration: calls the live ECCC API (deselect with '-m \"not integration\"')",
+]
