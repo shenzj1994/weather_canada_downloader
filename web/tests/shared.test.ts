@@ -2,7 +2,6 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { parseCsv, toCsv } from "../src/shared/csv.ts";
 import {
-  nearbyStations,
   parseClimateIds,
   parseInventory,
   resolveClimateIds,
@@ -122,15 +121,6 @@ describe("several stations", () => {
     const { found, missing } = resolveClimateIds(["1108395", "NOPE", "1108447", "0000000"], inv.stations);
     expect(found.map((s) => s.climateId)).toEqual(["1108395", "1108447"]);
     expect(missing).toEqual(["NOPE", "0000000"]);
-  });
-
-  it("finds nearby stations, nearest first", () => {
-    const yvr = inv.stations.find((s) => s.climateId === "1108395")!;
-    const near = nearbyStations(inv.stations, yvr, 10);
-    expect(near.length).toBeGreaterThan(0);
-    expect(near.map((n) => n.station.climateId)).not.toContain("1108395");
-    expect(near.every((n, i) => i === 0 || near[i - 1].km <= n.km)).toBe(true);
-    expect(near.every((n) => n.km <= 10)).toBe(true);
   });
 
   it("downloads each station only for the part of the range it has", () => {

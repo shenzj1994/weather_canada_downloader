@@ -1,6 +1,5 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import {
-  nearbyStations,
   parseClimateIds,
   resolveClimateIds,
   searchStations,
@@ -36,25 +35,274 @@ interface InventoryResponse {
   stations: Station[];
 }
 
+type Mode = "search" | "list";
+
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const LABEL: Record<Timeframe, string> = { hourly: "Hourly", daily: "Daily" };
+const MAX_STATIONS = 50;
+const MAX_RESULTS = 50;
 
 const fmtRange = (r: [number, number] | null) => (r ? `${r[0]}–${r[1]}` : "—");
 const titleCase = (s: string) => s.toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
-
-function defaultRange(tf: Timeframe, a: Availability): [YearMonth, YearMonth] {
-  if (tf === "hourly") {
-    const startIdx = Math.max(ymIndex(a.start), ymIndex(a.end) - 11);
-    return [ym(Math.floor(startIdx / 12), (startIdx % 12) + 1), a.end];
-  }
-  return [ym(Math.max(a.start.year, a.end.year - 4), 1), ym(a.end.year, 12)];
-}
+const stationLabel = (s: Station) => `${s.name} (${s.climateId})`;
 
 const clampYm = (v: YearMonth, a: Availability): YearMonth =>
   ymIndex(v) < ymIndex(a.start) ? a.start : ymIndex(v) > ymIndex(a.end) ? a.end : v;
 
-const MAX_STATIONS = 50;
-type Mode = "single" | "multi";
+/** Last 12 months (hourly) or last 5 years (daily) of `a`. */
+function defaultRange(tf: Timeframe, a: Availability): [YearMonth, YearMonth] {
+  if (tf === "hourly") {
+    const i = Math.max(ymIndex(a.start), ymIndex(a.end) - 11);
+    return [ym(Math.floor(i / 12), (i % 12) + 1), a.end];
+  }
+  return [ym(Math.max(a.start.year, a.end.year - 4), 1), ym(a.end.year, 12)];
+}
+
+export function App() {
+  const [inventory, setInventory] = useState<InventoryResponse | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [mode, setMode] = useState<Mode>("search");
+  const [station, setStation] = useState<Station | null>(null);
+  const [idsText, setIdsText] = useState("");
+
+  useEffect(() => {
+    fetch("/api/inventory")
+      .then(async (r) => {
+        if (!r.ok) throw new Error(((await r.json().catch(() => ({}))) as { error?: string }).error ?? r.statusText);
+        return r.json() as Promise<InventoryResponse>;
+      })
+      .then(setInventory)
+      .catch((e: Error) => setLoadError(e.message));
+  }, []);
+
+  const ids = useMemo(() => parseClimateIds(idsText), [idsText]);
+  const resolved = useMemo(
+    () => (inventory ? resolveClimateIds(ids, inventory.stations) : { found: [], missing: [] }),
+    [ids, inventory],
+  );
+
+  return (
+    <div className="page">
+      <header>
+        <h1>Canada Weather Downloader</h1>
+        <p className="muted">
+          Historical observations from Environment and Climate Change Canada, merged into one CSV.
+        </p>
+      </header>
+
+      <section className="card">
+        <h2>1. Choose stations</h2>
+        {loadError && <p className="error">Could not load the station inventory: {loadError}</p>}
+        {!inventory && !loadError && <p className="muted">Loading station inventory…</p>}
+        {inventory && (
+          <>
+            <div className="segmented mode" role="radiogroup" aria-label="How to choose stations">
+              <label>
+                <input type="radio" name="mode" checked={mode === "search"} onChange={() => setMode("search")} />
+                <span>Search for one station</span>
+              </label>
+              <label>
+                <input type="radio" name="mode" checked={mode === "list"} onChange={() => setMode("list")} />
+                <span>Enter a list of Climate IDs</span>
+              </label>
+            </div>
+
+            {mode === "search" ? (
+              <StationSearch stations={inventory.stations} selected={station} onSelect={setStation} />
+            ) : (
+              <ClimateIdList
+                value={idsText}
+                onChange={setIdsText}
+                found={resolved.found}
+                missing={resolved.missing}
+              />
+            )}
+
+            <p className="muted small">
+              {inventory.stations.length.toLocaleString()} stations · inventory updated{" "}
+              {inventory.modified?.slice(0, 10) ?? "unknown"}
+              {inventory.source === "snapshot" && " (bundled snapshot; ECCC unreachable)"}
+            </p>
+          </>
+        )}
+      </section>
+
+      {inventory && mode === "search" && station && (
+        <DownloadForm key={station.climateId} station={station} inventoryModified={inventory.modified} />
+      )}
+      {inventory && mode === "list" && resolved.found.length > 0 && (
+        <MultiStationForm
+          stations={resolved.found}
+          missing={resolved.missing}
+          inventoryModified={inventory.modified}
+        />
+      )}
+
+      <footer className="muted small">
+        Data © Environment and Climate Change Canada, from{" "}
+        <a href="https://climate.weather.gc.ca/">climate.weather.gc.ca</a>, used under the{" "}
+        <a href="https://open.canada.ca/en/open-government-licence-canada">
+          Open Government Licence – Canada
+        </a>
+        .
+      </footer>
+    </div>
+  );
+}
+
+/** Search box with a dropdown of matches (combobox). */
+function StationSearch({
+  stations,
+  selected,
+  onSelect,
+}: {
+  stations: Station[];
+  selected: Station | null;
+  onSelect: (s: Station) => void;
+}) {
+  const [query, setQuery] = useState(selected ? stationLabel(selected) : "");
+  const [open, setOpen] = useState(false);
+  const [active, setActive] = useState(0);
+  const listId = useId();
+  const listRef = useRef<HTMLUListElement>(null);
+
+  const results = useMemo(() => searchStations(stations, query, MAX_RESULTS), [stations, query]);
+  const showList = open && query.trim() !== "";
+
+  useEffect(() => {
+    listRef.current?.querySelector(`[data-index="${active}"]`)?.scrollIntoView({ block: "nearest" });
+  }, [active]);
+
+  function choose(s: Station) {
+    onSelect(s);
+    setQuery(stationLabel(s));
+    setOpen(false);
+  }
+
+  function onKeyDown(e: KeyboardEvent<HTMLInputElement>) {
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setOpen(true);
+      setActive((i) => Math.min(i + 1, results.length - 1));
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setActive((i) => Math.max(i - 1, 0));
+    } else if (e.key === "Enter" && showList && results[active]) {
+      e.preventDefault();
+      choose(results[active]);
+    } else if (e.key === "Escape") {
+      setOpen(false);
+    }
+  }
+
+  return (
+    <div className="combobox">
+      <input
+        className="search"
+        type="search"
+        autoFocus
+        role="combobox"
+        aria-expanded={showList}
+        aria-controls={listId}
+        aria-autocomplete="list"
+        aria-activedescendant={showList && results[active] ? `${listId}-${active}` : undefined}
+        aria-label="Search stations"
+        placeholder="Station name or Climate ID, e.g. “Vancouver Intl” or 1108395"
+        value={query}
+        onChange={(e) => {
+          setQuery(e.target.value);
+          setActive(0);
+          setOpen(true);
+        }}
+        onFocus={(e) => {
+          e.target.select();
+          setOpen(true);
+        }}
+        onBlur={() => setOpen(false)}
+        onKeyDown={onKeyDown}
+      />
+      {showList && (
+        <ul className="dropdown" id={listId} role="listbox" ref={listRef} aria-label="Matching stations">
+          {results.length === 0 && <li className="muted empty">No stations match.</li>}
+          {results.map((s, i) => (
+            <li
+              key={s.climateId}
+              id={`${listId}-${i}`}
+              data-index={i}
+              role="option"
+              aria-selected={i === active}
+              className={i === active ? "active" : ""}
+              // mousedown, not click, so it fires before the input's blur closes the list
+              onMouseDown={(e) => {
+                e.preventDefault();
+                choose(s);
+              }}
+              onMouseEnter={() => setActive(i)}
+            >
+              <span>
+                <strong>{s.name}</strong> <span className="muted small">{titleCase(s.province)}</span>
+              </span>
+              <span className="mono">{s.climateId}</span>
+              <span className="muted small">
+                hourly {fmtRange(s.hourly)} · daily {fmtRange(s.daily)}
+              </span>
+            </li>
+          ))}
+          {results.length === MAX_RESULTS && (
+            <li className="muted small empty">Showing the first {MAX_RESULTS} matches; keep typing to narrow.</li>
+          )}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function ClimateIdList({
+  value,
+  onChange,
+  found,
+  missing,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  found: Station[];
+  missing: string[];
+}) {
+  return (
+    <>
+      <textarea
+        className="ids"
+        rows={5}
+        autoFocus
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={"One per line, or separated by commas or spaces, e.g.\n1108395, 1108447, 1108380"}
+        aria-label="Climate IDs"
+      />
+      {missing.length > 0 && (
+        <p className="warning" role="alert">
+          ⚠ {missing.length === 1 ? "This Climate ID does" : "These Climate IDs do"} not exist in the station
+          inventory and will be skipped: <span className="mono">{missing.join(", ")}</span>
+        </p>
+      )}
+      {found.length > 0 && (
+        <>
+          <p className="muted small">
+            {found.length} station{found.length === 1 ? "" : "s"} recognised:
+          </p>
+          <ul className="chips">
+            {found.map((s) => (
+              <li key={s.climateId}>
+                <span className="mono">{s.climateId}</span> {s.name}
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+      {found.length > MAX_STATIONS && <p className="error">Enter at most {MAX_STATIONS} stations at a time.</p>}
+    </>
+  );
+}
 
 /** Download state shared by both forms. */
 function useDownloader() {
@@ -91,161 +339,6 @@ function useDownloader() {
 }
 
 type Downloader = ReturnType<typeof useDownloader>;
-
-export function App() {
-  const [inventory, setInventory] = useState<InventoryResponse | null>(null);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [query, setQuery] = useState("");
-  const [station, setStation] = useState<Station | null>(null);
-  const [mode, setMode] = useState<Mode>("single");
-  const [idsText, setIdsText] = useState("");
-
-  const addIds = (ids: string[]) =>
-    setIdsText((text) => {
-      const have = new Set(parseClimateIds(text));
-      const extra = ids.filter((id) => !have.has(id));
-      if (!extra.length) return text;
-      return (text.trim() ? `${text.trim()}\n` : "") + extra.join("\n");
-    });
-
-  function selectStation(s: Station) {
-    setStation(s);
-    if (mode === "multi") addIds([s.climateId]);
-  }
-
-  function chooseMode(m: Mode) {
-    setMode(m);
-    if (m === "multi" && station && !idsText.trim()) addIds([station.climateId]);
-  }
-
-  useEffect(() => {
-    fetch("/api/inventory")
-      .then(async (r) => {
-        if (!r.ok) throw new Error(((await r.json().catch(() => ({}))) as { error?: string }).error ?? r.statusText);
-        return r.json() as Promise<InventoryResponse>;
-      })
-      .then(setInventory)
-      .catch((e: Error) => setLoadError(e.message));
-  }, []);
-
-  const results = useMemo(
-    () => (inventory ? searchStations(inventory.stations, query, 50) : []),
-    [inventory, query],
-  );
-
-  return (
-    <div className="page">
-      <header>
-        <h1>Canada Weather Downloader</h1>
-        <p className="muted">
-          Historical observations from Environment and Climate Change Canada, merged into one CSV.
-        </p>
-      </header>
-
-      <section className="card">
-        <h2>1. Find a station</h2>
-        {loadError && <p className="error">Could not load the station inventory: {loadError}</p>}
-        {!inventory && !loadError && <p className="muted">Loading station inventory…</p>}
-        {inventory && (
-          <>
-            <input
-              className="search"
-              type="search"
-              autoFocus
-              placeholder="Station name or Climate ID, e.g. “Vancouver Intl” or 1108395"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              aria-label="Search stations"
-            />
-            <p className="muted small">
-              {inventory.stations.length.toLocaleString()} stations · inventory updated{" "}
-              {inventory.modified?.slice(0, 10) ?? "unknown"}
-              {inventory.source === "snapshot" && " (bundled snapshot; ECCC unreachable)"}
-            </p>
-            {query.trim() && (
-              <StationList results={results} selected={station} onSelect={selectStation} />
-            )}
-          </>
-        )}
-      </section>
-
-      {inventory && (
-        <div className="tabs" role="tablist" aria-label="Download mode">
-          {(["single", "multi"] as const).map((m) => (
-            <button key={m} role="tab" aria-selected={mode === m} className={mode === m ? "active" : ""} onClick={() => chooseMode(m)}>
-              {m === "single" ? "One station" : "Several stations"}
-            </button>
-          ))}
-        </div>
-      )}
-
-      {inventory && mode === "single" && station && (
-        <DownloadForm key={station.climateId} station={station} inventoryModified={inventory.modified} />
-      )}
-      {inventory && mode === "single" && !station && (
-        <p className="muted hint">Search for a station above and select it.</p>
-      )}
-      {inventory && mode === "multi" && (
-        <MultiStationForm
-          inventory={inventory}
-          anchor={station}
-          idsText={idsText}
-          setIdsText={setIdsText}
-          addIds={addIds}
-        />
-      )}
-
-      <footer className="muted small">
-        Data © Environment and Climate Change Canada, from{" "}
-        <a href="https://climate.weather.gc.ca/">climate.weather.gc.ca</a>, used under the{" "}
-        <a href="https://open.canada.ca/en/open-government-licence-canada">
-          Open Government Licence – Canada
-        </a>
-        .
-      </footer>
-    </div>
-  );
-}
-
-function StationList({
-  results,
-  selected,
-  onSelect,
-}: {
-  results: Station[];
-  selected: Station | null;
-  onSelect: (s: Station) => void;
-}) {
-  if (results.length === 0) return <p className="muted">No stations match.</p>;
-  return (
-    <div className="results" role="listbox" aria-label="Matching stations">
-      <div className="row head">
-        <span>Station</span>
-        <span>Climate ID</span>
-        <span>Hourly</span>
-        <span>Daily</span>
-      </div>
-      {results.map((s) => (
-        <button
-          key={s.climateId}
-          role="option"
-          aria-selected={selected?.climateId === s.climateId}
-          className={`row ${selected?.climateId === s.climateId ? "selected" : ""}`}
-          onClick={() => onSelect(s)}
-        >
-          <span>
-            <strong>{s.name}</strong>
-            <span className="muted small"> {titleCase(s.province)}</span>
-          </span>
-          <span className="mono">{s.climateId}</span>
-          <span>{fmtRange(s.hourly)}</span>
-          <span>{fmtRange(s.daily)}</span>
-        </button>
-      ))}
-      {results.length === 50 && <p className="muted small">Showing the first 50 matches; refine your search.</p>}
-    </div>
-  );
-}
 
 function DownloadForm({ station, inventoryModified }: { station: Station; inventoryModified: string | null }) {
   const avails = useMemo(() => {
@@ -334,9 +427,7 @@ function DownloadForm({ station, inventoryModified }: { station: Station; invent
               <span>
                 {LABEL[tf]}
                 <small>
-                  {avails[tf]
-                    ? `${avails[tf]!.start.year}–${avails[tf]!.end.year}`
-                    : "not available"}
+                  {avails[tf] ? `${avails[tf]!.start.year}–${avails[tf]!.end.year}` : "not available"}
                 </small>
               </span>
             </label>
@@ -370,6 +461,140 @@ function DownloadForm({ station, inventoryModified }: { station: Station; invent
 
       {invalid && <p className="error">{invalid}</p>}
       <DownloadControls dl={dl} requests={todo.length} disabled={!!invalid} onStart={startDownload} />
+    </section>
+  );
+}
+
+function MultiStationForm({
+  stations,
+  missing,
+  inventoryModified,
+}: {
+  stations: Station[];
+  missing: string[];
+  inventoryModified: string | null;
+}) {
+  const [timeframe, setTimeframe] = useState<Timeframe>("daily");
+  const [timezone, setTimezone] = useState<"lst" | "utc">("lst");
+  const [dropEmpty, setDropEmpty] = useState(true);
+  const dl = useDownloader();
+  const { busy } = dl;
+
+  // The pickers span the earliest record among the stations to today; each
+  // station is then downloaded for whatever it has inside the chosen range.
+  const bounds: Availability = useMemo(() => {
+    const firsts = stations.map((s) => s[timeframe]?.[0]).filter((y): y is number => y !== undefined);
+    return { start: ym(firsts.length ? Math.min(...firsts) : 1840, 1), end: currentYm(), extended: false };
+  }, [stations, timeframe]);
+  const [range, setRange] = useState<[YearMonth, YearMonth]>(() => defaultRange("daily", bounds));
+  const start = clampYm(range[0], bounds);
+  const end = clampYm(range[1], bounds);
+
+  const jobs = stations.map((s) => ({
+    station: s,
+    periods: stationPeriods(availability(s, timeframe, inventoryModified), timeframe, start, end),
+  }));
+  const withData = jobs.filter((j) => j.periods.length > 0);
+  const noData = jobs.filter((j) => j.periods.length === 0);
+  const requests = withData.reduce((n, j) => n + j.periods.length, 0);
+  const tooMany = stations.length > MAX_STATIONS;
+
+  function chooseTimeframe(tf: Timeframe) {
+    setTimeframe(tf);
+    setRange(defaultRange(tf, { ...bounds, end: currentYm() }));
+    dl.reset();
+  }
+
+  function update(which: 0 | 1, v: YearMonth) {
+    const next: [YearMonth, YearMonth] = [start, end];
+    next[which] = clampYm(v, bounds);
+    if (ymIndex(next[0]) > ymIndex(next[1])) next[which === 0 ? 1 : 0] = next[which];
+    setRange(next);
+    dl.reset();
+  }
+
+  function startDownload() {
+    const opts = { timeframe, timezone, dropEmpty, failFast: false };
+    dl.run(
+      withData.map((j) => ({ climateId: j.station.climateId, periods: j.periods })),
+      opts,
+      filenameFor(withData.map((j) => j.station), opts, start, end),
+    );
+  }
+
+  const nameOf = (id: string) => stations.find((s) => s.climateId === id)?.name ?? id;
+
+  // A new list invalidates the previous result.
+  const listKey = stations.map((s) => s.climateId).join(",");
+  useEffect(() => {
+    if (!dl.busy) dl.reset();
+  }, [listKey]);
+
+  return (
+    <section className="card">
+      <h2>2. Choose data</h2>
+      <p className="muted small station-summary">
+        {stations.length} station{stations.length === 1 ? "" : "s"}. Each is downloaded for whatever data it has
+        inside the range.
+      </p>
+
+      <fieldset disabled={busy}>
+        <legend>Granularity</legend>
+        <div className="segmented">
+          {TIMEFRAMES.map((tf) => (
+            <label key={tf}>
+              <input type="radio" name="multi-timeframe" value={tf} checked={timeframe === tf} onChange={() => chooseTimeframe(tf)} />
+              <span>{LABEL[tf]}</span>
+            </label>
+          ))}
+        </div>
+      </fieldset>
+
+      <fieldset disabled={busy}>
+        <legend>Range</legend>
+        <div className="range">
+          <RangePicker label="From" value={start} avail={bounds} showMonth={timeframe === "hourly"} onChange={(v) => update(0, v)} />
+          <RangePicker label="To" value={end} avail={bounds} showMonth={timeframe === "hourly"} onChange={(v) => update(1, v)} isEnd />
+        </div>
+        {noData.length > 0 && (
+          <p className="warning">
+            No {timeframe} data in this range, so these will be left out:{" "}
+            {noData.map((j) => `${j.station.climateId} ${j.station.name} (${fmtRange(j.station[timeframe])})`).join("; ")}
+          </p>
+        )}
+      </fieldset>
+
+      <OptionsFieldset
+        busy={busy}
+        timeframe={timeframe}
+        timezone={timezone}
+        setTimezone={setTimezone}
+        dropEmpty={dropEmpty}
+        setDropEmpty={setDropEmpty}
+      />
+
+      <DownloadControls dl={dl} requests={requests} disabled={tooMany || withData.length === 0} onStart={startDownload}>
+        {dl.result && (
+          <ul className="small station-rows">
+            {[...dl.result.rowsByStation].map(([id, n]) => (
+              <li key={id}>
+                <span className="mono">{id}</span> {nameOf(id)}:{" "}
+                {n ? `${n.toLocaleString()} rows` : "no data returned by ECCC for this range"}
+              </li>
+            ))}
+            {dl.result.failed.map((f) => (
+              <li key={f.climateId} className="error">
+                <span className="mono">{f.climateId}</span> {nameOf(f.climateId)}: left out, download failed ({f.error})
+              </li>
+            ))}
+            {missing.length > 0 && (
+              <li className="warning">
+                Skipped, not in the station inventory: <span className="mono">{missing.join(", ")}</span>
+              </li>
+            )}
+          </ul>
+        )}
+      </DownloadControls>
     </section>
   );
 }
@@ -460,234 +685,6 @@ function DownloadControls({
       )}
     </>
   );
-}
-
-function MultiStationForm({
-  inventory,
-  anchor,
-  idsText,
-  setIdsText,
-  addIds,
-}: {
-  inventory: InventoryResponse;
-  anchor: Station | null;
-  idsText: string;
-  setIdsText: (t: string) => void;
-  addIds: (ids: string[]) => void;
-}) {
-  const [timeframe, setTimeframe] = useState<Timeframe>("daily");
-  const [range, setRange] = useState<[YearMonth, YearMonth]>(() => multiDefaultRange("daily"));
-  const [timezone, setTimezone] = useState<"lst" | "utc">("lst");
-  const [dropEmpty, setDropEmpty] = useState(true);
-  const [radiusKm, setRadiusKm] = useState(25);
-  const dl = useDownloader();
-  const { busy } = dl;
-
-  const ids = useMemo(() => parseClimateIds(idsText), [idsText]);
-  const { found, missing } = useMemo(() => resolveClimateIds(ids, inventory.stations), [ids, inventory]);
-
-  // The pickers span the earliest record among the entered stations to today;
-  // each station is then downloaded for whatever it has inside the range.
-  const bounds: Availability = useMemo(() => {
-    const firsts = found.map((s) => s[timeframe]?.[0]).filter((y): y is number => y !== undefined);
-    return { start: ym(firsts.length ? Math.min(...firsts) : 1840, 1), end: currentYm(), extended: false };
-  }, [found, timeframe]);
-  const start = clampYm(range[0], bounds);
-  const end = clampYm(range[1], bounds);
-
-  const jobs = found.map((s) => ({
-    station: s,
-    periods: stationPeriods(availability(s, timeframe, inventory.modified), timeframe, start, end),
-  }));
-  const withData = jobs.filter((j) => j.periods.length > 0);
-  const noData = jobs.filter((j) => j.periods.length === 0);
-  const requests = withData.reduce((n, j) => n + j.periods.length, 0);
-  const tooMany = found.length > MAX_STATIONS;
-
-  const center = anchor ?? found[0] ?? null;
-  const nearby = useMemo(() => {
-    if (!center) return [];
-    const have = new Set(ids);
-    return nearbyStations(inventory.stations, center, radiusKm)
-      .filter(({ station: s }) => s[timeframe] && !have.has(s.climateId))
-      .slice(0, 15);
-  }, [center, inventory, radiusKm, timeframe, ids]);
-
-  function chooseTimeframe(tf: Timeframe) {
-    setTimeframe(tf);
-    setRange(multiDefaultRange(tf));
-    dl.reset();
-  }
-
-  function update(which: 0 | 1, v: YearMonth) {
-    const next: [YearMonth, YearMonth] = [start, end];
-    next[which] = clampYm(v, bounds);
-    if (ymIndex(next[0]) > ymIndex(next[1])) next[which === 0 ? 1 : 0] = next[which];
-    setRange(next);
-    dl.reset();
-  }
-
-  function startDownload() {
-    const opts = { timeframe, timezone, dropEmpty, failFast: false };
-    dl.run(
-      withData.map((j) => ({ climateId: j.station.climateId, periods: j.periods })),
-      opts,
-      filenameFor(withData.map((j) => j.station), opts, start, end),
-    );
-  }
-
-  const nameOf = (id: string) => found.find((s) => s.climateId === id)?.name ?? id;
-
-  return (
-    <section className="card">
-      <h2>2. Choose stations and data</h2>
-
-      <fieldset disabled={busy}>
-        <legend>Climate IDs</legend>
-        <textarea
-          className="ids"
-          rows={4}
-          value={idsText}
-          onChange={(e) => {
-            setIdsText(e.target.value);
-            dl.reset();
-          }}
-          placeholder={"One per line, or separated by commas or spaces, e.g.\n1108395, 1108447, 1106PF7"}
-          aria-label="Climate IDs"
-        />
-        <p className="muted small">
-          {found.length} station{found.length === 1 ? "" : "s"} recognised. Clicking a search result above also adds
-          it here.
-        </p>
-        {missing.length > 0 && (
-          <p className="warning" role="alert">
-            ⚠ {missing.length === 1 ? "This Climate ID does" : "These Climate IDs do"} not exist in the station
-            inventory and will be skipped: <span className="mono">{missing.join(", ")}</span>
-          </p>
-        )}
-        {found.length > 0 && (
-          <ul className="chips">
-            {found.map((s) => (
-              <li key={s.climateId}>
-                <span className="mono">{s.climateId}</span> {s.name}
-              </li>
-            ))}
-          </ul>
-        )}
-      </fieldset>
-
-      {center && (
-        <details className="nearby" open>
-          <summary>
-            Stations near {center.name}{" "}
-            <select
-              value={radiusKm}
-              onChange={(e) => setRadiusKm(Number(e.target.value))}
-              onClick={(e) => e.stopPropagation()}
-              aria-label="Search radius"
-            >
-              {[10, 25, 50, 100].map((r) => (
-                <option key={r} value={r}>
-                  within {r} km
-                </option>
-              ))}
-            </select>
-          </summary>
-          {nearby.length === 0 ? (
-            <p className="muted small">No other stations with {timeframe} data in this radius.</p>
-          ) : (
-            <>
-              <ul className="nearby-list">
-                {nearby.map(({ station: s, km }) => (
-                  <li key={s.climateId}>
-                    <button className="link" disabled={busy} onClick={() => addIds([s.climateId])}>
-                      Add
-                    </button>
-                    <span className="mono">{s.climateId}</span>
-                    <span>{s.name}</span>
-                    <span className="muted small">
-                      {km.toFixed(1)} km · {LABEL[timeframe].toLowerCase()} {fmtRange(s[timeframe])}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-              <button disabled={busy} onClick={() => addIds(nearby.map(({ station: s }) => s.climateId))}>
-                Add all {nearby.length}
-              </button>
-            </>
-          )}
-        </details>
-      )}
-
-      <fieldset disabled={busy}>
-        <legend>Granularity</legend>
-        <div className="segmented">
-          {TIMEFRAMES.map((tf) => (
-            <label key={tf}>
-              <input type="radio" name="multi-timeframe" value={tf} checked={timeframe === tf} onChange={() => chooseTimeframe(tf)} />
-              <span>{LABEL[tf]}</span>
-            </label>
-          ))}
-        </div>
-      </fieldset>
-
-      <fieldset disabled={busy}>
-        <legend>Range</legend>
-        <div className="range">
-          <RangePicker label="From" value={start} avail={bounds} showMonth={timeframe === "hourly"} onChange={(v) => update(0, v)} />
-          <RangePicker label="To" value={end} avail={bounds} showMonth={timeframe === "hourly"} onChange={(v) => update(1, v)} isEnd />
-        </div>
-        <p className="muted small">Each station is downloaded for whatever data it has inside this range.</p>
-        {noData.length > 0 && (
-          <p className="warning">
-            No {timeframe} data in this range, so these will be left out:{" "}
-            {noData.map((j) => `${j.station.climateId} ${j.station.name} (${fmtRange(j.station[timeframe])})`).join("; ")}
-          </p>
-        )}
-      </fieldset>
-
-      <OptionsFieldset
-        busy={busy}
-        timeframe={timeframe}
-        timezone={timezone}
-        setTimezone={setTimezone}
-        dropEmpty={dropEmpty}
-        setDropEmpty={setDropEmpty}
-      />
-
-      {tooMany && <p className="error">Enter at most {MAX_STATIONS} stations at a time.</p>}
-      <DownloadControls dl={dl} requests={requests} disabled={tooMany || withData.length === 0} onStart={startDownload}>
-        {dl.result && (
-          <ul className="small station-rows">
-            {[...dl.result.rowsByStation].map(([id, n]) => (
-              <li key={id}>
-                <span className="mono">{id}</span> {nameOf(id)}: {n ? `${n.toLocaleString()} rows` : "no data returned by ECCC for this range"}
-              </li>
-            ))}
-            {dl.result.failed.map((f) => (
-              <li key={f.climateId} className="error">
-                <span className="mono">{f.climateId}</span> {nameOf(f.climateId)}: left out, download failed ({f.error})
-              </li>
-            ))}
-            {missing.length > 0 && (
-              <li className="warning">
-                Skipped, not in the station inventory: <span className="mono">{missing.join(", ")}</span>
-              </li>
-            )}
-          </ul>
-        )}
-      </DownloadControls>
-    </section>
-  );
-}
-
-function multiDefaultRange(tf: Timeframe): [YearMonth, YearMonth] {
-  const today = currentYm();
-  if (tf === "hourly") {
-    const i = ymIndex(today) - 11;
-    return [ym(Math.floor(i / 12), (i % 12) + 1), today];
-  }
-  return [ym(today.year - 4, 1), ym(today.year, 12)];
 }
 
 function RangePicker({
