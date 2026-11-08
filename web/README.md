@@ -4,7 +4,8 @@ A small web app on top of ECCC's bulk-data endpoint:
 
 1. **Find a station.** The station inventory is loaded live from ECCC and searched in the browser by name or Climate ID.
 2. **Choose data.** Pick hourly or daily data and a range. Only granularities the station has are enabled, and the range pickers only offer what the inventory lists. The server checks every request against the inventory again.
-3. **Download one CSV.** The browser fetches each period through the server (ECCC sends no CORS headers), four at a time, with retries and a progress bar. It then merges them into a single CSV with one header row and saves it. Nothing is written to disk on the server.
+3. **Several stations (optional).** On the *Several stations* tab you can paste a list of Climate IDs, separated by commas, spaces or new lines. You can also click search results or the *Stations near …* suggestions to add them. You pick one granularity and range for all of them, and each station is downloaded for whatever data it has inside that range. IDs that are not in the inventory are listed in a warning and skipped. Stations with no data in the range are listed too. If one station fails to download, it is left out of the file and reported, and the others are kept. The limit is 50 stations at a time.
+4. **Download one CSV.** The browser fetches each period through the server (ECCC sends no CORS headers), four at a time, with retries and a progress bar. It then merges them into a single CSV with one header row and saves it. With several stations, the rows are grouped by station, in the order you entered them; the `Climate ID` and `Station Name` columns tell them apart. Nothing is written to disk on the server.
 
 ## Stack
 

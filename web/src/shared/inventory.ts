@@ -122,3 +122,54 @@ export function searchStations(stations: Station[], query: string, limit = 50): 
   );
   return [...idHits, ...nameHits].slice(0, limit);
 }
+
+/** Split user input into Climate IDs (commas, semicolons, spaces or new lines), deduplicated. */
+export function parseClimateIds(text: string): string[] {
+  const seen = new Set<string>();
+  for (const raw of text.split(/[\s,;]+/)) {
+    const id = raw.trim().toUpperCase();
+    if (id) seen.add(id);
+  }
+  return [...seen];
+}
+
+/** Look Climate IDs up in the inventory, keeping input order. */
+export function resolveClimateIds(
+  ids: string[],
+  stations: Station[],
+): { found: Station[]; missing: string[] } {
+  const byId = new Map(stations.map((s) => [s.climateId, s]));
+  const found: Station[] = [];
+  const missing: string[] = [];
+  for (const id of ids) {
+    const s = byId.get(id);
+    if (s) found.push(s);
+    else missing.push(id);
+  }
+  return { found, missing };
+}
+
+/** Great-circle distance in km. */
+export function distanceKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const rad = Math.PI / 180;
+  const a =
+    Math.sin(((lat2 - lat1) * rad) / 2) ** 2 +
+    Math.cos(lat1 * rad) * Math.cos(lat2 * rad) * Math.sin(((lon2 - lon1) * rad) / 2) ** 2;
+  return 2 * 6371.0088 * Math.asin(Math.min(1, Math.sqrt(a)));
+}
+
+/** Stations within `radiusKm` of `origin` (excluding it), nearest first. */
+export function nearbyStations(
+  stations: Station[],
+  origin: Station,
+  radiusKm: number,
+): { station: Station; km: number }[] {
+  if (origin.lat === null || origin.lon === null) return [];
+  const out: { station: Station; km: number }[] = [];
+  for (const s of stations) {
+    if (s.climateId === origin.climateId || s.lat === null || s.lon === null) continue;
+    const km = distanceKm(origin.lat, origin.lon, s.lat, s.lon);
+    if (km <= radiusKm) out.push({ station: s, km });
+  }
+  return out.sort((a, b) => a.km - b.km);
+}

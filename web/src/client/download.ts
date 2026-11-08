@@ -1,25 +1,33 @@
 /**
- * Fetch every period of a request through /api/chunk and merge them into a
- * single CSV Blob, in chronological order, with one header row.
+ * Fetch every period of one or more stations through /api/chunk and merge
+ * them into a single CSV Blob with one header row: stations in the order
+ * given, each in chronological order.
  */
 
 import type { Timeframe } from "../shared/inventory.ts";
-import { fmtYm, periods, type YearMonth } from "../shared/range.ts";
+import { fmtYm, type YearMonth } from "../shared/range.ts";
 
-export interface DownloadRequest {
+export interface StationJob {
   climateId: string;
-  stationName: string;
+  periods: YearMonth[];
+}
+
+export interface DownloadOptions {
   timeframe: Timeframe;
-  start: YearMonth;
-  end: YearMonth;
   timezone: "lst" | "utc";
   dropEmpty: boolean;
+  /** Throw on the first failed period (one station) instead of skipping the station (several). */
+  failFast: boolean;
 }
 
 export interface DownloadResult {
   blob: Blob;
   filename: string;
   rows: number;
+  /** Rows per Climate ID. */
+  rowsByStation: Map<string, number>;
+  /** Stations left out of the file because a period failed to download. */
+  failed: { climateId: string; error: string }[];
 }
 
 export interface Progress {
@@ -30,28 +38,30 @@ export interface Progress {
 const CONCURRENCY = 4;
 const RETRIES = 3;
 
-export function chunkCount(req: Pick<DownloadRequest, "timeframe" | "start" | "end">): number {
-  return periods(req.timeframe, req.start, req.end).length;
+const slug = (s: string) => s.replace(/[^A-Za-z0-9]+/g, "_").replace(/^_|_$/g, "");
+
+/** File name such as `1108395_VANCOUVER_INTL_A_daily_2020_2024.csv` or `5_stations_hourly_UTC_….csv`. */
+export function filenameFor(
+  stations: { climateId: string; name: string }[],
+  opts: Pick<DownloadOptions, "timeframe" | "timezone">,
+  start: YearMonth,
+  end: YearMonth,
+): string {
+  const who =
+    stations.length === 1 ? `${stations[0].climateId}_${slug(stations[0].name)}` : `${stations.length}_stations`;
+  const span = opts.timeframe === "hourly" ? `${fmtYm(start)}_${fmtYm(end)}` : `${start.year}_${end.year}`;
+  const tz = opts.timeframe === "hourly" ? `_${opts.timezone.toUpperCase()}` : "";
+  return `${who}_${opts.timeframe}${tz}_${span}.csv`;
 }
 
-export function filenameFor(req: DownloadRequest): string {
-  const slug = req.stationName.replace(/[^A-Za-z0-9]+/g, "_").replace(/^_|_$/g, "");
-  const span =
-    req.timeframe === "hourly"
-      ? `${fmtYm(req.start)}_${fmtYm(req.end)}`
-      : `${req.start.year}_${req.end.year}`;
-  const tz = req.timeframe === "hourly" ? `_${req.timezone.toUpperCase()}` : "";
-  return `${req.climateId}_${slug}_${req.timeframe}${tz}_${span}.csv`;
-}
-
-function chunkUrl(req: DownloadRequest, p: YearMonth): string {
+function chunkUrl(climateId: string, p: YearMonth, opts: DownloadOptions): string {
   const q = new URLSearchParams({
-    climateId: req.climateId,
-    timeframe: req.timeframe,
+    climateId,
+    timeframe: opts.timeframe,
     year: String(p.year),
     month: String(p.month),
-    tz: req.timezone,
-    dropEmpty: req.dropEmpty ? "1" : "0",
+    tz: opts.timezone,
+    dropEmpty: opts.dropEmpty ? "1" : "0",
   });
   return `/api/chunk?${q}`;
 }
@@ -87,56 +97,75 @@ async function fetchChunk(url: string, signal: AbortSignal): Promise<string> {
   throw new Error(lastError || "Download failed");
 }
 
-export async function downloadCsv(
-  req: DownloadRequest,
+export async function downloadMerged(
+  jobs: StationJob[],
+  opts: DownloadOptions,
+  filename: string,
   { signal, onProgress }: { signal: AbortSignal; onProgress: (p: Progress) => void },
 ): Promise<DownloadResult> {
-  const todo = periods(req.timeframe, req.start, req.end);
-  const results: string[] = new Array(todo.length);
+  const tasks = jobs.flatMap((job, j) => job.periods.map((p) => ({ j, p })));
+  const texts: string[][] = jobs.map((job) => new Array(job.periods.length).fill(""));
+  const offsets = jobs.map((_, j) => tasks.findIndex((t) => t.j === j));
+  const failed = new Map<number, string>();
   let next = 0;
   let done = 0;
-  onProgress({ done, total: todo.length });
+  onProgress({ done, total: tasks.length });
 
   async function worker() {
-    while (next < todo.length) {
+    while (next < tasks.length) {
       const i = next++;
-      const p = todo[i];
-      try {
-        results[i] = await fetchChunk(chunkUrl(req, p), signal);
-      } catch (err) {
-        if (signal.aborted) throw err;
-        const label = req.timeframe === "hourly" ? fmtYm(p) : String(p.year);
-        throw new Error(`Failed to download ${label}: ${(err as Error).message}`);
+      const { j, p } = tasks[i];
+      if (!failed.has(j)) {
+        try {
+          texts[j][i - offsets[j]] = await fetchChunk(chunkUrl(jobs[j].climateId, p, opts), signal);
+        } catch (err) {
+          if (signal.aborted) throw err;
+          const label = opts.timeframe === "hourly" ? fmtYm(p) : String(p.year);
+          const message = `${label}: ${(err as Error).message}`;
+          if (opts.failFast) throw new Error(`Failed to download ${message}`);
+          if (!failed.has(j)) failed.set(j, message);
+        }
       }
-      onProgress({ done: ++done, total: todo.length });
+      onProgress({ done: ++done, total: tasks.length });
     }
   }
-  await Promise.all(Array.from({ length: Math.min(CONCURRENCY, todo.length) }, worker));
+  await Promise.all(Array.from({ length: Math.min(CONCURRENCY, tasks.length) }, worker));
 
   // Each chunk is a CSV with a header line; keep the first header only.
   const parts: string[] = ["﻿"]; // BOM so spreadsheet apps read °C correctly
   let header: string | null = null;
   let rows = 0;
-  for (const text of results) {
-    if (!text) continue;
-    const nl = text.indexOf("\n");
-    const body = nl < 0 ? "" : text.slice(nl + 1);
-    if (header === null) {
-      header = text.slice(0, nl < 0 ? text.length : nl + 1);
-      parts.push(header);
+  const rowsByStation = new Map<string, number>();
+  jobs.forEach((job, j) => {
+    if (failed.has(j)) return;
+    let stationRows = 0;
+    for (const text of texts[j]) {
+      if (!text) continue;
+      const nl = text.indexOf("\n");
+      const body = nl < 0 ? "" : text.slice(nl + 1);
+      if (header === null) {
+        header = text.slice(0, nl < 0 ? text.length : nl + 1);
+        parts.push(header);
+      }
+      if (body) {
+        parts.push(body);
+        stationRows += body.split("\n").length - 1;
+      }
     }
-    if (body) {
-      parts.push(body);
-      rows += body.split("\n").length - 1;
-    }
-  }
-  if (header === null || rows === 0) {
-    throw new Error("ECCC returned no data for this selection.");
+    rowsByStation.set(job.climateId, stationRows);
+    rows += stationRows;
+  });
+  const failedList = [...failed].map(([j, error]) => ({ climateId: jobs[j].climateId, error }));
+  if (rows === 0) {
+    const why = failedList.map((f) => `${f.climateId} (${f.error})`).join("; ");
+    throw new Error(`ECCC returned no data for this selection.${why ? ` Failed: ${why}` : ""}`);
   }
   return {
     blob: new Blob(parts, { type: "text/csv;charset=utf-8" }),
-    filename: filenameFor(req),
+    filename,
     rows,
+    rowsByStation,
+    failed: failedList,
   };
 }
 

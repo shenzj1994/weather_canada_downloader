@@ -1,8 +1,15 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { parseCsv, toCsv } from "../src/shared/csv.ts";
-import { parseInventory, searchStations, type Station } from "../src/shared/inventory.ts";
-import { availability, periods, validateRange, ym } from "../src/shared/range.ts";
+import {
+  nearbyStations,
+  parseClimateIds,
+  parseInventory,
+  resolveClimateIds,
+  searchStations,
+  type Station,
+} from "../src/shared/inventory.ts";
+import { availability, periods, stationPeriods, validateRange, ym } from "../src/shared/range.ts";
 import { filterRows } from "../src/shared/rows.ts";
 
 const SNAPSHOT = readFileSync(new URL("../../src/canada_weather/data/Station Inventory EN.csv", import.meta.url), "utf-8");
@@ -99,5 +106,40 @@ describe("filterRows", () => {
   it("drops rows whose measurements are all blank", () => {
     expect(filterRows(rows, { dropEmpty: true }).map((r) => r[2])).toEqual(["Date/Time", "2020-01-01", "2021-01-01"]);
     expect(filterRows(rows, { dropEmpty: false })).toHaveLength(4);
+  });
+});
+
+describe("several stations", () => {
+  const inv = parseInventory(SNAPSHOT);
+  const now = new Date("2026-11-08T00:00:00Z");
+
+  it("parses Climate IDs separated by commas, spaces and new lines", () => {
+    expect(parseClimateIds(" 1108395, 1108447\n1106pf7;1108395  ")).toEqual(["1108395", "1108447", "1106PF7"]);
+    expect(parseClimateIds("  ")).toEqual([]);
+  });
+
+  it("reports Climate IDs missing from the inventory", () => {
+    const { found, missing } = resolveClimateIds(["1108395", "NOPE", "1108447", "0000000"], inv.stations);
+    expect(found.map((s) => s.climateId)).toEqual(["1108395", "1108447"]);
+    expect(missing).toEqual(["NOPE", "0000000"]);
+  });
+
+  it("finds nearby stations, nearest first", () => {
+    const yvr = inv.stations.find((s) => s.climateId === "1108395")!;
+    const near = nearbyStations(inv.stations, yvr, 10);
+    expect(near.length).toBeGreaterThan(0);
+    expect(near.map((n) => n.station.climateId)).not.toContain("1108395");
+    expect(near.every((n, i) => i === 0 || near[i - 1].km <= n.km)).toBe(true);
+    expect(near.every((n) => n.km <= 10)).toBe(true);
+  });
+
+  it("downloads each station only for the part of the range it has", () => {
+    const s = station({ hourly: [2000, 2010], daily: [2000, 2010] });
+    const a = availability(s, "daily", "2026-06-03T23:30:00Z", now);
+    expect(stationPeriods(a, "daily", ym(2008, 1), ym(2015, 12))).toEqual([ym(2008, 1), ym(2009, 1), ym(2010, 1)]);
+    expect(stationPeriods(a, "daily", ym(2015, 1), ym(2020, 12))).toEqual([]);
+    const h = availability(s, "hourly", "2026-06-03T23:30:00Z", now);
+    expect(stationPeriods(h, "hourly", ym(2010, 11), ym(2011, 3))).toEqual([ym(2010, 11), ym(2010, 12)]);
+    expect(stationPeriods(null, "hourly", ym(2010, 11), ym(2011, 3))).toEqual([]);
   });
 });

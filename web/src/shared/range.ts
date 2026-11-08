@@ -102,3 +102,20 @@ export function isPeriodFinal(timeframe: Timeframe, period: YearMonth, now: Date
   if (timeframe === "hourly") return ymIndex(period) < ymIndex(today);
   return period.year < today.year;
 }
+
+/**
+ * Periods to request for one station: the user's [start, end] intersected
+ * with what the station has. Empty when they don't overlap.
+ */
+export function stationPeriods(
+  avail: Availability | null,
+  timeframe: Timeframe,
+  start: YearMonth,
+  end: YearMonth,
+): YearMonth[] {
+  if (!avail) return [];
+  const lo = ymIndex(start) > ymIndex(avail.start) ? start : avail.start;
+  const hi = ymIndex(end) < ymIndex(avail.end) ? end : avail.end;
+  if (timeframe === "daily" ? lo.year > hi.year : ymIndex(lo) > ymIndex(hi)) return [];
+  return periods(timeframe, lo, hi);
+}
