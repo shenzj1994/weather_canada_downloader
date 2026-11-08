@@ -1,0 +1,69 @@
+name: Update station inventory
+
+# ECCC republishes "Station Inventory EN.csv" about once a month. This job
+# downloads it and, if it is newer than the bundled copy, opens (or updates)
+# a pull request replacing src/canada_weather/data/Station Inventory EN.csv.
+#
+# Requires: Settings → Actions → General → Workflow permissions →
+# "Allow GitHub Actions to create and approve pull requests".
+
+on:
+  schedule:
+    - cron: "23 19 5 * *"  # 5th of every month, 19:23 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: update-inventory
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.13"
+
+      - name: Download latest inventory
+        id: inventory
+        run: uv run python scripts/update_inventory.py --summary "$RUNNER_TEMP/summary.md"
+
+      # PRs opened with GITHUB_TOKEN don't trigger other workflows, so run the
+      # offline test suites here before proposing the change.
+      - name: Python tests
+        if: steps.inventory.outputs.changed == 'true'
+        run: uv run --extra dev pytest -m "not integration" --tb=short
+
+      - uses: actions/setup-node@v4
+        if: steps.inventory.outputs.changed == 'true'
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Web tests
+        if: steps.inventory.outputs.changed == 'true'
+        working-directory: web
+        run: npm ci && npm test
+
+      - name: Open pull request
+        if: steps.inventory.outputs.changed == 'true'
+        uses: peter-evans/create-pull-request@v7
+        with:
+          branch: automation/update-station-inventory
+          delete-branch: true
+          add-paths: src/canada_weather/data/Station Inventory EN.csv
+          commit-message: "Update station inventory to ECCC's ${{ steps.inventory.outputs.date }} release"
+          title: "Update station inventory (${{ steps.inventory.outputs.date }})"
+          body-path: ${{ runner.temp }}/summary.md
+
+      - name: Job summary
+        if: always()
+        run: |
+          if [ -f "$RUNNER_TEMP/summary.md" ]; then cat "$RUNNER_TEMP/summary.md" >> "$GITHUB_STEP_SUMMARY";
+          else echo "Bundled inventory is already the latest (${{ steps.inventory.outputs.date }})." >> "$GITHUB_STEP_SUMMARY"; fi

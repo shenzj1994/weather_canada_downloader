@@ -104,7 +104,7 @@ Columns are lower-case with units as suffixes: `max_temp_c`, `total_precip_mm`, 
 
 ## Station inventory
 
-A snapshot of ECCC's *Station Inventory EN.csv* ships with the package. ECCC republishes it about once a month. To get the latest version:
+A snapshot of ECCC's *Station Inventory EN.csv* ships with the package. ECCC republishes it about once a month. A monthly GitHub Action ([`update-inventory.yml`](.github/workflows/update-inventory.yml)) opens a pull request when ECCC publishes a newer copy, so the bundled snapshot stays current. To get the latest version:
 
 ```python
 from canada_weather import refresh_station_inventory, inventory_modified_date
