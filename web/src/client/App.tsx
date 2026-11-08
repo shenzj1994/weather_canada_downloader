@@ -4,9 +4,11 @@ import {
   resolveClimateIds,
   searchStations,
   TIMEFRAMES,
+  type Inventory,
   type Station,
   type Timeframe,
 } from "../shared/inventory.ts";
+import { decodeStations, type StationsFile } from "../shared/stations.ts";
 import {
   availability,
   currentYm,
@@ -29,11 +31,6 @@ import {
   type StationJob,
 } from "./download.ts";
 
-interface InventoryResponse {
-  modified: string | null;
-  source: "live" | "snapshot";
-  stations: Station[];
-}
 
 type Mode = "search" | "list";
 
@@ -59,17 +56,17 @@ function defaultRange(tf: Timeframe, a: Availability): [YearMonth, YearMonth] {
 }
 
 export function App() {
-  const [inventory, setInventory] = useState<InventoryResponse | null>(null);
+  const [inventory, setInventory] = useState<Inventory | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [mode, setMode] = useState<Mode>("search");
   const [station, setStation] = useState<Station | null>(null);
   const [idsText, setIdsText] = useState("");
 
   useEffect(() => {
-    fetch("/api/inventory")
+    fetch("/stations.json")
       .then(async (r) => {
-        if (!r.ok) throw new Error(((await r.json().catch(() => ({}))) as { error?: string }).error ?? r.statusText);
-        return r.json() as Promise<InventoryResponse>;
+        if (!r.ok) throw new Error(`Server responded ${r.status}`);
+        return decodeStations((await r.json()) as StationsFile);
       })
       .then(setInventory)
       .catch((e: Error) => setLoadError(e.message));
@@ -121,7 +118,6 @@ export function App() {
             <p className="muted small">
               {inventory.stations.length.toLocaleString()} stations · inventory updated{" "}
               {inventory.modified?.slice(0, 10) ?? "unknown"}
-              {inventory.source === "snapshot" && " (bundled snapshot; ECCC unreachable)"}
             </p>
           </>
         )}

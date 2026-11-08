@@ -63,6 +63,8 @@ docker build -t canada-weather-web .
 docker run --rm -p 8080:8080 canada-weather-web   # http://localhost:8080
 ```
 
+It can also be deployed to Cloudflare Workers; see [web/README.md](web/README.md#hosting-on-cloudflare).
+
 ## Climate ID vs Station ID
 
 The **Climate ID** (e.g. `"1108395"`) is ECCC's official, permanent identifier, so use it. The **Station ID** is an internal number that the API needs. ECCC says it "may be subject to change without notice", so the package looks it up for you from the station inventory. Passing `station_id=` directly works, but you'll get a warning.

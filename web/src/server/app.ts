@@ -1,39 +1,33 @@
 /**
  * Hono API. It only uses web-standard APIs (fetch, Request, Response), so the
- * same app runs on Node (see node.ts), Cloudflare Workers or Vercel.
+ * same app runs on Node (node.ts, used by Docker) and Cloudflare Workers
+ * (worker.ts).
  *
- *   GET /api/inventory   station inventory as JSON (live from ECCC, cached)
  *   GET /api/chunk       one period of data for one station, as CSV
  *   GET /api/health
+ *
+ * The station list itself is a static file (/stations.json) built from the
+ * inventory in the repository, so the API never downloads the inventory.
  */
 
 import { Hono } from "hono";
 import { parseCsv, toCsv } from "../shared/csv.ts";
-import { parseInventory, TIMEFRAMES, type Inventory, type Station, type Timeframe } from "../shared/inventory.ts";
+import { TIMEFRAMES, type Timeframe } from "../shared/inventory.ts";
 import { availability, isPeriodFinal, validateRange, ym } from "../shared/range.ts";
 import { filterRows } from "../shared/rows.ts";
+import type { StationLookup } from "../shared/stations.ts";
 
-export const INVENTORY_URL =
-  "https://collaboration.cmc.ec.gc.ca/cmc/climate/Get_More_Data_Plus_de_donnees/Station%20Inventory%20EN.csv";
 export const BULK_URL = "https://climate.weather.gc.ca/climate_data/bulk_data_e.html";
 const TIMEFRAME_CODE: Record<Timeframe, number> = { hourly: 1, daily: 2 };
 const USER_AGENT = "canada-weather-web (+https://github.com/shenzj1994/weather_canada_downloader)";
 
 export interface AppOptions {
+  /** Stations used to resolve and validate Climate IDs. */
+  stations: StationLookup;
   /** fetch implementation (injectable for tests). */
   fetch?: typeof fetch;
-  /** Bundled inventory snapshot, used when ECCC cannot be reached. */
-  loadFallbackInventory?: () => Promise<string | null>;
-  /** How long a loaded inventory is reused before refreshing (ms). */
-  inventoryTtlMs?: number;
   /** Clock (injectable for tests). */
   now?: () => Date;
-}
-
-interface LoadedInventory extends Inventory {
-  source: "live" | "snapshot";
-  loadedAt: number;
-  byClimateId: Map<string, Station>;
 }
 
 class HttpError extends Error {
@@ -70,45 +64,11 @@ async function fetchWithRetry(
   throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
 }
 
-function index(inv: Inventory, source: LoadedInventory["source"], now: number): LoadedInventory {
-  return { ...inv, source, loadedAt: now, byClimateId: new Map(inv.stations.map((s) => [s.climateId, s])) };
-}
-
-export function createApp(options: AppOptions = {}) {
+export function createApp(options: AppOptions) {
   const doFetch = options.fetch ?? fetch;
-  const ttl = options.inventoryTtlMs ?? 12 * 60 * 60 * 1000;
   const now = options.now ?? (() => new Date());
-
-  let current: LoadedInventory | null = null;
-  let pending: Promise<LoadedInventory> | null = null;
-
-  async function loadInventory(): Promise<LoadedInventory> {
-    const t = now().getTime();
-    try {
-      const res = await fetchWithRetry(doFetch, INVENTORY_URL, { retries: 1, timeoutMs: 20_000 });
-      if (!res.ok) throw new Error(`ECCC responded ${res.status}`);
-      const live = parseInventory(await res.text());
-      return index(live, "live", t);
-    } catch (err) {
-      console.warn(`Could not load the live station inventory: ${(err as Error).message}`);
-      if (current) return { ...current, loadedAt: t }; // keep serving the last good copy
-      const text = await options.loadFallbackInventory?.();
-      if (!text) throw new HttpError(503, "The station inventory is unavailable. Try again later.");
-      return index(parseInventory(text), "snapshot", t);
-    }
-  }
-
-  async function getInventory(): Promise<LoadedInventory> {
-    // Retry ECCC sooner when serving the bundled snapshot.
-    const maxAge = current?.source === "snapshot" ? Math.min(ttl, 10 * 60 * 1000) : ttl;
-    const fresh = current && now().getTime() - current.loadedAt < maxAge;
-    if (fresh) return current!;
-    pending ??= loadInventory()
-      .then((inv) => (current = inv))
-      .finally(() => (pending = null));
-    // Serve a stale copy while refreshing in the background.
-    return current ?? pending;
-  }
+  const { stations } = options;
+  const { modified } = stations;
 
   const app = new Hono();
 
@@ -118,13 +78,7 @@ export function createApp(options: AppOptions = {}) {
     return c.json({ error: "Internal server error" }, 500);
   });
 
-  app.get("/api/health", (c) => c.json({ ok: true }));
-
-  app.get("/api/inventory", async (c) => {
-    const inv = await getInventory();
-    c.header("Cache-Control", "public, max-age=3600");
-    return c.json({ modified: inv.modified, source: inv.source, stations: inv.stations });
-  });
+  app.get("/api/health", (c) => c.json({ ok: true, inventory: modified }));
 
   app.get("/api/chunk", async (c) => {
     const q = c.req.query();
@@ -136,14 +90,13 @@ export function createApp(options: AppOptions = {}) {
     if (tz !== "lst" && tz !== "utc") throw new HttpError(400, "tz must be lst or utc");
     const dropEmpty = q.dropEmpty !== "0";
 
-    const inv = await getInventory();
-    const station = inv.byClimateId.get((q.climateId ?? "").trim().toUpperCase());
+    const station = stations.get((q.climateId ?? "").trim().toUpperCase());
     if (!station) throw new HttpError(404, "Unknown Climate ID");
 
     // One request is one period: a month for hourly, a year for daily.
     const start = ym(year, month);
     const end = timeframe === "hourly" ? start : ym(year, 12);
-    const avail = availability(station, timeframe, inv.modified, now());
+    const avail = availability(station, timeframe, modified, now());
     const invalid = validateRange(avail, timeframe, start, end);
     if (invalid) throw new HttpError(400, invalid);
 

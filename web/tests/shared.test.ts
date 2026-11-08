@@ -10,6 +10,7 @@ import {
 } from "../src/shared/inventory.ts";
 import { availability, periods, stationPeriods, validateRange, ym } from "../src/shared/range.ts";
 import { filterRows } from "../src/shared/rows.ts";
+import { decodeStations, encodeStations, stationLookup } from "../src/shared/stations.ts";
 
 const SNAPSHOT = readFileSync(new URL("../../src/canada_weather/data/Station Inventory EN.csv", import.meta.url), "utf-8");
 
@@ -46,6 +47,14 @@ describe("inventory", () => {
     expect(yvr.name).toBe("VANCOUVER INTL A");
     expect(yvr.stationId).toBe(51442);
     expect(yvr.daily?.[0]).toBe(2013);
+  });
+  it("round-trips through the condensed stations.json format", () => {
+    const file = JSON.parse(JSON.stringify(encodeStations(inv)));
+    expect(decodeStations(file)).toEqual(inv);
+    expect(() => decodeStations({ ...file, version: 2 })).toThrow(/version/);
+    const lookup = stationLookup(file);
+    expect(lookup.get("1108395")).toEqual(inv.stations.find((s) => s.climateId === "1108395"));
+    expect(lookup.get("NOPE")).toBeUndefined();
   });
   it("rejects non-inventory text", () => {
     expect(() => parseInventory("<html></html>")).toThrow();

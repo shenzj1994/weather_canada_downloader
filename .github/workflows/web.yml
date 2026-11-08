@@ -25,6 +25,8 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
+      - name: Check the Cloudflare Worker bundles
+        run: npx wrangler deploy --dry-run --outdir "$RUNNER_TEMP/worker"
 
   docker:
     runs-on: ubuntu-latest

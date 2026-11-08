@@ -8,11 +8,16 @@
     "node": ">=20"
   },
   "scripts": {
+    "stations": "tsx scripts/build-stations.ts",
+    "predev": "npm run stations",
     "dev": "vite",
+    "prebuild": "npm run stations",
     "build": "npm run build:client && npm run build:server",
     "build:client": "vite build",
     "build:server": "esbuild src/server/node.ts --bundle --platform=node --format=esm --target=node20 --outfile=dist/server.mjs",
     "start": "node dist/server.mjs",
+    "cf:dev": "npm run build && wrangler dev",
+    "deploy": "npm run build && wrangler deploy",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
@@ -28,8 +33,10 @@
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.2.1",
     "esbuild": "^0.28.2",
+    "tsx": "^4.23.15",
     "typescript": "~5.9.3",
     "vite": "^8.3.6",
-    "vitest": "^5.1.0"
+    "vitest": "^5.1.0",
+    "wrangler": "^4.158.0"
   }
 }
