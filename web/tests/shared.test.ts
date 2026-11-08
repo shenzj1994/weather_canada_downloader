@@ -1,0 +1,108 @@
+import { readFileSync } from "node:fs";
+import { describe, expect, it } from "vitest";
+import { parseCsv, toCsv } from "../src/shared/csv.ts";
+import { parseInventory, searchStations, type Station } from "../src/shared/inventory.ts";
+import { availability, periods, validateRange, ym } from "../src/shared/range.ts";
+import { filterRows } from "../src/shared/rows.ts";
+
+const SNAPSHOT = readFileSync(new URL("../../src/canada_weather/data/Station Inventory EN.csv", import.meta.url), "utf-8");
+
+const station = (over: Partial<Station> = {}): Station => ({
+  name: "TEST",
+  province: "BRITISH COLUMBIA",
+  climateId: "1",
+  stationId: 1,
+  lat: null,
+  lon: null,
+  elevation: null,
+  hourly: null,
+  daily: null,
+  monthly: null,
+  ...over,
+});
+
+describe("csv", () => {
+  it("handles BOM, quotes, embedded commas and escaped quotes", () => {
+    const rows = parseCsv('﻿"a","b"\r\n"x,y","say ""hi"""\n"",""\n');
+    expect(rows).toEqual([["a", "b"], ["x,y", 'say "hi"'], ["", ""]]);
+  });
+  it("round-trips", () => {
+    const rows = [["a", "b,c"], ['"q"', ""]];
+    expect(parseCsv(toCsv(rows))).toEqual(rows);
+  });
+});
+
+describe("inventory", () => {
+  const inv = parseInventory(SNAPSHOT);
+  it("parses the bundled snapshot", () => {
+    expect(inv.modified).toBe("2026-06-03T23:30:00Z");
+    expect(inv.stations.length).toBeGreaterThan(8000);
+    const yvr = inv.stations.find((s) => s.climateId === "1108395")!;
+    expect(yvr.name).toBe("VANCOUVER INTL A");
+    expect(yvr.stationId).toBe(51442);
+    expect(yvr.daily?.[0]).toBe(2013);
+  });
+  it("rejects non-inventory text", () => {
+    expect(() => parseInventory("<html></html>")).toThrow();
+  });
+  it("searches by climate ID first, then name", () => {
+    expect(searchStations(inv.stations, "1108395")[0].climateId).toBe("1108395");
+    const hits = searchStations(inv.stations, "vancouver intl");
+    expect(hits.map((s) => s.climateId)).toContain("1108395");
+    expect(searchStations(inv.stations, "  ")).toEqual([]);
+  });
+});
+
+describe("availability", () => {
+  const now = new Date("2026-11-08T00:00:00Z");
+  it("extends active stations to the current month", () => {
+    const a = availability(station({ hourly: [2013, 2026] }), "hourly", "2026-06-03T23:30:00Z", now)!;
+    expect(a.start).toEqual(ym(2013, 1));
+    expect(a.end).toEqual(ym(2026, 11));
+  });
+  it("extends stations that ended the year before the snapshot", () => {
+    const a = availability(station({ daily: [2000, 2025] }), "daily", "2026-06-03T23:30:00Z", now)!;
+    expect(a.end.year).toBe(2026);
+    expect(a.extended).toBe(true);
+  });
+  it("keeps closed stations to their record", () => {
+    const a = availability(station({ daily: [1984, 1996] }), "daily", "2026-06-03T23:30:00Z", now)!;
+    expect(a.end).toEqual(ym(1996, 12));
+  });
+  it("returns null without data", () => {
+    expect(availability(station(), "monthly", null, now)).toBeNull();
+  });
+  it("validates ranges against availability", () => {
+    const a = availability(station({ hourly: [1990, 2000], daily: [1990, 2000] }), "hourly", null, now);
+    expect(validateRange(a, "hourly", ym(1990, 1), ym(2000, 12))).toBeNull();
+    expect(validateRange(a, "hourly", ym(1989, 12), ym(1990, 2))).toMatch(/only available/);
+    expect(validateRange(a, "hourly", ym(2000, 2), ym(2000, 1))).toMatch(/after/);
+    expect(validateRange(null, "monthly", ym(2000, 1), ym(2000, 1))).toMatch(/no monthly/);
+  });
+});
+
+describe("periods", () => {
+  it("splits hourly by month, daily by year, monthly into one request", () => {
+    expect(periods("hourly", ym(2023, 11), ym(2024, 2))).toEqual([ym(2023, 11), ym(2023, 12), ym(2024, 1), ym(2024, 2)]);
+    expect(periods("daily", ym(2020, 1), ym(2022, 12))).toEqual([ym(2020, 1), ym(2021, 1), ym(2022, 1)]);
+    expect(periods("monthly", ym(1950, 1), ym(2000, 12))).toEqual([ym(1950, 1)]);
+  });
+});
+
+describe("filterRows", () => {
+  const header = ["Station Name", "Climate ID", "Date/Time", "Year", "Data Quality", "Max Temp (°C)", "Max Temp Flag", "Weather"];
+  const rows = [
+    header,
+    ["A", "1", "2020-01-01", "2020", "", "1.0", "", "NA"],
+    ["A", "1", "2020-01-02", "2020", "", "", "M", "NA"],
+    ["A", "1", "2021-01-01", "2021", "", "", "", "Rain,Fog"],
+    ["short"],
+  ];
+  it("drops rows whose measurements are all blank", () => {
+    expect(filterRows(rows, { dropEmpty: true }).map((r) => r[2])).toEqual(["Date/Time", "2020-01-01", "2021-01-01"]);
+    expect(filterRows(rows, { dropEmpty: false })).toHaveLength(4);
+  });
+  it("filters by year", () => {
+    expect(filterRows(rows, { dropEmpty: false, years: [2021, 2021] })).toHaveLength(2);
+  });
+});

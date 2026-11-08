@@ -1,0 +1,296 @@
+:root {
+  --bg: #f6f7f9;
+  --card: #ffffff;
+  --text: #1b1f24;
+  --muted: #5f6b7a;
+  --border: #d9dee5;
+  --accent: #c8102e;
+  --accent-text: #ffffff;
+  --hover: #f0f2f5;
+  --selected: #fdecef;
+  --error: #b42318;
+  --success: #067647;
+  color-scheme: light dark;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  line-height: 1.45;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #111418;
+    --card: #1a1f25;
+    --text: #e6e9ee;
+    --muted: #97a2b0;
+    --border: #2e3640;
+    --accent: #e5485f;
+    --hover: #222932;
+    --selected: #3a1f26;
+    --error: #ff8a80;
+    --success: #6fd3a0;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+}
+
+a {
+  color: inherit;
+}
+
+.page {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 24px 16px 48px;
+}
+
+header h1 {
+  margin: 0 0 4px;
+  font-size: 1.6rem;
+}
+
+h2 {
+  font-size: 1.1rem;
+  margin: 0 0 12px;
+}
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 20px;
+  margin: 20px 0;
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.small {
+  font-size: 0.85rem;
+}
+
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.error {
+  color: var(--error);
+}
+
+.success {
+  color: var(--success);
+}
+
+input,
+select,
+button {
+  font: inherit;
+  color: inherit;
+}
+
+.search {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+}
+
+.results {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  max-height: 420px;
+  overflow: auto;
+}
+
+.results .row {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) 1fr 1fr 1fr 1fr;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 12px;
+  text-align: left;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  background: none;
+  font-size: 0.9rem;
+}
+
+.results button.row {
+  cursor: pointer;
+}
+
+.results button.row:hover {
+  background: var(--hover);
+}
+
+.results .row.selected {
+  background: var(--selected);
+}
+
+.results .row.head {
+  position: sticky;
+  top: 0;
+  background: var(--card);
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.results p {
+  padding: 8px 12px;
+  margin: 0;
+}
+
+.station-summary {
+  margin-bottom: 16px;
+}
+
+fieldset {
+  border: 0;
+  padding: 0;
+  margin: 0 0 16px;
+}
+
+legend {
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.segmented {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.segmented label {
+  position: relative;
+  cursor: pointer;
+}
+
+.segmented input {
+  position: absolute;
+  opacity: 0;
+}
+
+.segmented span {
+  display: flex;
+  flex-direction: column;
+  padding: 8px 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  min-width: 120px;
+}
+
+.segmented small {
+  color: var(--muted);
+}
+
+.segmented input:checked + span {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.segmented input:focus-visible + span {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.segmented label.disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.range {
+  display: flex;
+  gap: 24px;
+  flex-wrap: wrap;
+}
+
+.picker {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.picker-label {
+  min-width: 40px;
+}
+
+select {
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+}
+
+label.inline {
+  display: block;
+  margin: 6px 0;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+button {
+  padding: 8px 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card);
+  cursor: pointer;
+}
+
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-text);
+  font-weight: 600;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+button.link {
+  padding: 0;
+  border: 0;
+  background: none;
+  text-decoration: underline;
+  color: inherit;
+}
+
+.progress {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.progress progress {
+  flex: 1;
+  accent-color: var(--accent);
+}
+
+footer {
+  margin-top: 32px;
+}
+
+@media (max-width: 640px) {
+  .results .row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .results .row > span:nth-child(n + 3) {
+    display: none;
+  }
+}

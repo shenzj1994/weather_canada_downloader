@@ -54,6 +54,15 @@ canada-weather download 1108395 2024 2024 -t hourly --timezone utc --cache -o yv
 canada-weather refresh-inventory
 ```
 
+## Web app
+
+A web UI lives in [`web/`](web/README.md). You search the station inventory, pick a granularity and a range that the station actually has data for, and get back a single merged CSV. It runs in one Docker container:
+
+```bash
+docker build -t canada-weather-web .
+docker run --rm -p 8080:8080 canada-weather-web   # http://localhost:8080
+```
+
 ## Climate ID vs Station ID
 
 The **Climate ID** (e.g. `"1108395"`) is ECCC's official, permanent identifier, so use it. The **Station ID** is an internal number that the API needs. ECCC says it "may be subject to change without notice", so the package looks it up for you from the station inventory. Passing `station_id=` directly works, but you'll get a warning.

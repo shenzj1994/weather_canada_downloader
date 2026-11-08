@@ -1,0 +1,6 @@
+**
+!Dockerfile
+!web/
+web/node_modules
+web/dist
+!src/canada_weather/data/Station Inventory EN.csv
