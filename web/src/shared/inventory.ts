@@ -2,8 +2,9 @@
 
 import { parseCsv } from "./csv.ts";
 
-export type Timeframe = "hourly" | "daily" | "monthly";
-export const TIMEFRAMES: readonly Timeframe[] = ["hourly", "daily", "monthly"];
+/** Granularities offered by the web app. */
+export type Timeframe = "hourly" | "daily";
+export const TIMEFRAMES: readonly Timeframe[] = ["hourly", "daily"];
 
 /** Inclusive [first, last] year range, or null when the station has no data. */
 export type YearRange = [number, number] | null;
@@ -18,7 +19,6 @@ export interface Station {
   elevation: number | null;
   hourly: YearRange;
   daily: YearRange;
-  monthly: YearRange;
 }
 
 export interface Inventory {
@@ -36,8 +36,6 @@ const REQUIRED = [
   "HLY Last Year",
   "DLY First Year",
   "DLY Last Year",
-  "MLY First Year",
-  "MLY Last Year",
 ] as const;
 
 function toInt(value: string | undefined): number | null {
@@ -98,7 +96,6 @@ export function parseInventory(text: string): Inventory {
       elevation: toFloat(r[col["Elevation (m)"]]),
       hourly: range(r[col["HLY First Year"]], r[col["HLY Last Year"]]),
       daily: range(r[col["DLY First Year"]], r[col["DLY Last Year"]]),
-      monthly: range(r[col["MLY First Year"]], r[col["MLY Last Year"]]),
     });
   }
   if (stations.length === 0) throw new Error("Station inventory contains no stations");

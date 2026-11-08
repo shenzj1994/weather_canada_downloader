@@ -16,7 +16,7 @@ import { filterRows } from "../shared/rows.ts";
 export const INVENTORY_URL =
   "https://collaboration.cmc.ec.gc.ca/cmc/climate/Get_More_Data_Plus_de_donnees/Station%20Inventory%20EN.csv";
 export const BULK_URL = "https://climate.weather.gc.ca/climate_data/bulk_data_e.html";
-const TIMEFRAME_CODE: Record<Timeframe, number> = { hourly: 1, daily: 2, monthly: 3 };
+const TIMEFRAME_CODE: Record<Timeframe, number> = { hourly: 1, daily: 2 };
 const USER_AGENT = "canada-weather-web (+https://github.com/shenzj1994/weather_canada_downloader)";
 
 export interface AppOptions {
@@ -129,7 +129,7 @@ export function createApp(options: AppOptions = {}) {
   app.get("/api/chunk", async (c) => {
     const q = c.req.query();
     const timeframe = q.timeframe as Timeframe;
-    if (!TIMEFRAMES.includes(timeframe)) throw new HttpError(400, "timeframe must be hourly, daily or monthly");
+    if (!TIMEFRAMES.includes(timeframe)) throw new HttpError(400, "timeframe must be hourly or daily");
     const year = Number(q.year);
     const month = timeframe === "hourly" ? Number(q.month) : 1;
     const tz = (q.tz ?? "lst").toLowerCase();
@@ -140,11 +140,9 @@ export function createApp(options: AppOptions = {}) {
     const station = inv.byClimateId.get((q.climateId ?? "").trim().toUpperCase());
     if (!station) throw new HttpError(404, "Unknown Climate ID");
 
-    // Monthly data comes back in one request for the whole record and is
-    // filtered to [year, endYear]; the other timeframes are one period each.
-    const endYear = timeframe === "monthly" ? Number(q.endYear ?? year) : year;
+    // One request is one period: a month for hourly, a year for daily.
     const start = ym(year, month);
-    const end = timeframe === "hourly" ? start : ym(endYear, 12);
+    const end = timeframe === "hourly" ? start : ym(year, 12);
     const avail = availability(station, timeframe, inv.modified, now());
     const invalid = validateRange(avail, timeframe, start, end);
     if (invalid) throw new HttpError(400, invalid);
@@ -174,10 +172,7 @@ export function createApp(options: AppOptions = {}) {
       return c.body(null, 204);
     }
 
-    const rows = filterRows(parseCsv(text), {
-      dropEmpty,
-      years: timeframe === "monthly" ? [year, endYear] : undefined,
-    });
+    const rows = filterRows(parseCsv(text), { dropEmpty });
     const final = isPeriodFinal(timeframe, start, now());
     c.header("Content-Type", "text/csv; charset=utf-8");
     c.header("X-Row-Count", String(rows.length - 1));

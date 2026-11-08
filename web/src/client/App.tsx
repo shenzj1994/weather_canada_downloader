@@ -18,7 +18,7 @@ interface InventoryResponse {
 }
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-const LABEL: Record<Timeframe, string> = { hourly: "Hourly", daily: "Daily", monthly: "Monthly" };
+const LABEL: Record<Timeframe, string> = { hourly: "Hourly", daily: "Daily" };
 
 const fmtRange = (r: [number, number] | null) => (r ? `${r[0]}–${r[1]}` : "—");
 const titleCase = (s: string) => s.toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
@@ -28,8 +28,7 @@ function defaultRange(tf: Timeframe, a: Availability): [YearMonth, YearMonth] {
     const startIdx = Math.max(ymIndex(a.start), ymIndex(a.end) - 11);
     return [ym(Math.floor(startIdx / 12), (startIdx % 12) + 1), a.end];
   }
-  if (tf === "daily") return [ym(Math.max(a.start.year, a.end.year - 4), 1), ym(a.end.year, 12)];
-  return [ym(a.start.year, 1), ym(a.end.year, 12)];
+  return [ym(Math.max(a.start.year, a.end.year - 4), 1), ym(a.end.year, 12)];
 }
 
 const clampYm = (v: YearMonth, a: Availability): YearMonth =>
@@ -125,7 +124,6 @@ function StationList({
         <span>Climate ID</span>
         <span>Hourly</span>
         <span>Daily</span>
-        <span>Monthly</span>
       </div>
       {results.map((s) => (
         <button
@@ -142,7 +140,6 @@ function StationList({
           <span className="mono">{s.climateId}</span>
           <span>{fmtRange(s.hourly)}</span>
           <span>{fmtRange(s.daily)}</span>
-          <span>{fmtRange(s.monthly)}</span>
         </button>
       ))}
       {results.length === 50 && <p className="muted small">Showing the first 50 matches; refine your search.</p>}
@@ -278,8 +275,8 @@ function DownloadForm({ station, inventoryModified }: { station: Station; invent
       <fieldset disabled={busy}>
         <legend>Range</legend>
         <div className="range">
-          <RangePicker label="From" value={start} avail={avail} monthly={timeframe === "hourly"} onChange={(v) => update(0, v)} />
-          <RangePicker label="To" value={end} avail={avail} monthly={timeframe === "hourly"} onChange={(v) => update(1, v)} isEnd />
+          <RangePicker label="From" value={start} avail={avail} showMonth={timeframe === "hourly"} onChange={(v) => update(0, v)} />
+          <RangePicker label="To" value={end} avail={avail} showMonth={timeframe === "hourly"} onChange={(v) => update(1, v)} isEnd />
         </div>
         <p className="muted small">
           Available:{" "}
@@ -348,14 +345,14 @@ function RangePicker({
   label,
   value,
   avail,
-  monthly,
+  showMonth,
   isEnd = false,
   onChange,
 }: {
   label: string;
   value: YearMonth;
   avail: Availability;
-  monthly: boolean;
+  showMonth: boolean;
   isEnd?: boolean;
   onChange: (v: YearMonth) => void;
 }) {
@@ -366,7 +363,7 @@ function RangePicker({
   return (
     <div className="picker">
       <span className="picker-label">{label}</span>
-      {monthly && (
+      {showMonth && (
         <select
           aria-label={`${label} month`}
           value={value.month}
@@ -382,7 +379,7 @@ function RangePicker({
       <select
         aria-label={`${label} year`}
         value={value.year}
-        onChange={(e) => onChange(ym(Number(e.target.value), monthly ? value.month : isEnd ? 12 : 1))}
+        onChange={(e) => onChange(ym(Number(e.target.value), showMonth ? value.month : isEnd ? 12 : 1))}
       >
         {years.map((y) => (
           <option key={y} value={y}>

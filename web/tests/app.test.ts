@@ -85,8 +85,10 @@ describe("api", () => {
     expect(future.status).toBe(400);
     const unknown = await app.request("/api/chunk?climateId=NOPE&timeframe=daily&year=2020");
     expect(unknown.status).toBe(404);
-    const badTf = await app.request("/api/chunk?climateId=1108395&timeframe=weekly&year=2020");
-    expect(badTf.status).toBe(400);
+    for (const tf of ["weekly", "monthly"]) {
+      const badTf = await app.request(`/api/chunk?climateId=1108395&timeframe=${tf}&year=2020`);
+      expect(badTf.status).toBe(400);
+    }
   });
 
   it("returns 204 when ECCC answers with HTML", async () => {

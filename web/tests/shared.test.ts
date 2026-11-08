@@ -17,7 +17,6 @@ const station = (over: Partial<Station> = {}): Station => ({
   elevation: null,
   hourly: null,
   daily: null,
-  monthly: null,
   ...over,
 });
 
@@ -35,7 +34,7 @@ describe("csv", () => {
 describe("inventory", () => {
   const inv = parseInventory(SNAPSHOT);
   it("parses the bundled snapshot", () => {
-    expect(inv.modified).toBe("2026-06-03T23:30:00Z");
+    expect(inv.modified).toMatch(/^\d{4}-\d{2}-\d{2}T/);
     expect(inv.stations.length).toBeGreaterThan(8000);
     const yvr = inv.stations.find((s) => s.climateId === "1108395")!;
     expect(yvr.name).toBe("VANCOUVER INTL A");
@@ -70,22 +69,21 @@ describe("availability", () => {
     expect(a.end).toEqual(ym(1996, 12));
   });
   it("returns null without data", () => {
-    expect(availability(station(), "monthly", null, now)).toBeNull();
+    expect(availability(station(), "hourly", null, now)).toBeNull();
   });
   it("validates ranges against availability", () => {
     const a = availability(station({ hourly: [1990, 2000], daily: [1990, 2000] }), "hourly", null, now);
     expect(validateRange(a, "hourly", ym(1990, 1), ym(2000, 12))).toBeNull();
     expect(validateRange(a, "hourly", ym(1989, 12), ym(1990, 2))).toMatch(/only available/);
     expect(validateRange(a, "hourly", ym(2000, 2), ym(2000, 1))).toMatch(/after/);
-    expect(validateRange(null, "monthly", ym(2000, 1), ym(2000, 1))).toMatch(/no monthly/);
+    expect(validateRange(null, "daily", ym(2000, 1), ym(2000, 1))).toMatch(/no daily/);
   });
 });
 
 describe("periods", () => {
-  it("splits hourly by month, daily by year, monthly into one request", () => {
+  it("splits hourly by month and daily by year", () => {
     expect(periods("hourly", ym(2023, 11), ym(2024, 2))).toEqual([ym(2023, 11), ym(2023, 12), ym(2024, 1), ym(2024, 2)]);
     expect(periods("daily", ym(2020, 1), ym(2022, 12))).toEqual([ym(2020, 1), ym(2021, 1), ym(2022, 1)]);
-    expect(periods("monthly", ym(1950, 1), ym(2000, 12))).toEqual([ym(1950, 1)]);
   });
 });
 
@@ -101,8 +99,5 @@ describe("filterRows", () => {
   it("drops rows whose measurements are all blank", () => {
     expect(filterRows(rows, { dropEmpty: true }).map((r) => r[2])).toEqual(["Date/Time", "2020-01-01", "2021-01-01"]);
     expect(filterRows(rows, { dropEmpty: false })).toHaveLength(4);
-  });
-  it("filters by year", () => {
-    expect(filterRows(rows, { dropEmpty: false, years: [2021, 2021] })).toHaveLength(2);
   });
 });

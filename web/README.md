@@ -3,7 +3,7 @@
 A small web app on top of ECCC's bulk-data endpoint:
 
 1. **Find a station.** The station inventory is loaded live from ECCC and searched in the browser by name or Climate ID.
-2. **Choose data.** Pick hourly, daily or monthly data and a range. Only granularities the station has are enabled, and the range pickers only offer what the inventory lists. The server checks every request against the inventory again.
+2. **Choose data.** Pick hourly or daily data and a range. Only granularities the station has are enabled, and the range pickers only offer what the inventory lists. The server checks every request against the inventory again.
 3. **Download one CSV.** The browser fetches each period through the server (ECCC sends no CORS headers), four at a time, with retries and a progress bar. It then merges them into a single CSV with one header row and saves it. Nothing is written to disk on the server.
 
 ## Stack
@@ -27,7 +27,7 @@ web/
 | Endpoint | Description |
 |---|---|
 | `GET /api/inventory` | `{modified, source, stations[]}`, where `source` is `"live"` or `"snapshot"`. It is cached in memory for 12 h. If ECCC is down, the last good copy or the bundled snapshot is served. |
-| `GET /api/chunk?climateId=&timeframe=&year=&month=&tz=&dropEmpty=&endYear=` | One period as CSV: a month for `hourly`, a year for `daily`, or the record filtered to `year..endYear` for `monthly`. Returns 400 outside the station's record and 204 when ECCC has no data. |
+| `GET /api/chunk?climateId=&timeframe=&year=&month=&tz=&dropEmpty=` | One period as CSV: a month for `hourly` or a year for `daily`. Returns 400 outside the station's record and 204 when ECCC has no data. |
 | `GET /api/health` | Liveness check |
 
 As in the Python package, a station whose inventory record runs to the snapshot year, or the year before it, is treated as active. Its range is extended to the current month, because the inventory lags behind the data.

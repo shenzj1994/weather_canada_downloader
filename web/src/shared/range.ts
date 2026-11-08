@@ -4,8 +4,7 @@
  *
  * Endpoint behaviour (same as the Python package):
  * - hourly returns one calendar month per request;
- * - daily returns one calendar year per request;
- * - monthly returns the station's whole record whatever year is sent.
+ * - daily returns one calendar year per request.
  */
 
 import type { Station, Timeframe } from "./inventory.ts";
@@ -70,7 +69,7 @@ export function validateRange(
       return "Invalid date.";
     }
   }
-  // Daily and monthly requests are whole years.
+  // Daily requests are whole years.
   const s = timeframe === "hourly" ? start : ym(start.year, 1);
   const e = timeframe === "hourly" ? end : ym(end.year, 12);
   if (ymIndex(s) > ymIndex(e)) return "The start must not be after the end.";
@@ -88,7 +87,6 @@ export function validateRange(
 
 /** The (year, month) of each request needed for [start, end]. */
 export function periods(timeframe: Timeframe, start: YearMonth, end: YearMonth): YearMonth[] {
-  if (timeframe === "monthly") return [ym(start.year, 1)];
   const out: YearMonth[] = [];
   if (timeframe === "daily") {
     for (let y = start.year; y <= end.year; y++) out.push(ym(y, 1));
@@ -102,6 +100,5 @@ export function periods(timeframe: Timeframe, start: YearMonth, end: YearMonth):
 export function isPeriodFinal(timeframe: Timeframe, period: YearMonth, now: Date = new Date()): boolean {
   const today = currentYm(now);
   if (timeframe === "hourly") return ymIndex(period) < ymIndex(today);
-  if (timeframe === "daily") return period.year < today.year;
-  return false; // monthly returns the whole record, which grows while the station is active
+  return period.year < today.year;
 }

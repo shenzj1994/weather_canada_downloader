@@ -53,7 +53,6 @@ function chunkUrl(req: DownloadRequest, p: YearMonth): string {
     tz: req.timezone,
     dropEmpty: req.dropEmpty ? "1" : "0",
   });
-  if (req.timeframe === "monthly") q.set("endYear", String(req.end.year));
   return `/api/chunk?${q}`;
 }
 

@@ -23,8 +23,6 @@ const isBlank = (v: string | undefined) => v === undefined || v.trim() === "" ||
 export interface FilterOptions {
   /** Drop rows whose measurements are all blank (future dates, gaps). */
   dropEmpty: boolean;
-  /** Keep only rows whose "Year" is within this inclusive range. */
-  years?: [number, number];
 }
 
 /**
@@ -35,14 +33,9 @@ export function filterRows(rows: string[][], opts: FilterOptions): string[][] {
   if (rows.length === 0) return rows;
   const header = rows[0];
   const measure = header.map((h, i) => (!ID_COLUMNS.has(h) && !isFlag(h) ? i : -1)).filter((i) => i >= 0);
-  const yearIdx = header.indexOf("Year");
   const out = [header];
   for (const r of rows.slice(1)) {
     if (r.length !== header.length) continue;
-    if (opts.years && yearIdx >= 0) {
-      const y = Number(r[yearIdx]);
-      if (!(y >= opts.years[0] && y <= opts.years[1])) continue;
-    }
     if (opts.dropEmpty && measure.length && measure.every((i) => isBlank(r[i]))) continue;
     out.push(r);
   }
